@@ -24,7 +24,7 @@ export default function Agent() {
   useEffect(() => {
     // viaSocket keeps the thread; the stored user turn embeds the data snapshot, so show only the question.
     // Only fill an empty screen: history can arrive after the user already sent something, and must not wipe it.
-    if (hist.data?.messages) setMsgs((cur) => cur.length ? cur : hist.data.messages.map((m) => ({ role: m.role, at: m.created_at, text: m.role === 'user' ? String(m.content).split('\n\nLive data snapshot')[0].replace(/^HR question: /, '') : safeAnswer(m.content) })))
+    if (hist.data?.messages) setMsgs((cur) => cur.length ? cur : hist.data.messages.map((m) => ({ role: m.role, at: m.created_at, text: m.role === 'user' ? String(m.content).split(/\n\n(?:Live data snapshot|Current summary)/)[0].replace(/^HR question: /, '') : safeAnswer(m.content) })))
   }, [hist.data])
 
   const ask = useMutation({

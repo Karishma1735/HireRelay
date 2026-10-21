@@ -28,7 +28,7 @@ export async function start() {
   const [a, b] = [await signup('a@hr.test'), await signup('b@hr.test')]
   const as = (s) => (m, u, body, h) => call(s?.token, m, u, body, h)
   return {
-    a: as(a), b: as(b), anon: as(null), users: { a: a.user, b: b.user },
+    a: as(a), b: as(b), anon: as(null), base, users: { a: a.user, b: b.user },
     stop: async () => { server.close(); await closeDb() }
   }
 }

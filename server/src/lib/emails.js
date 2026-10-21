@@ -50,3 +50,17 @@ export function queueNumber(c, drive, ahead) {
       'Regards,<br>The hiring team'])
   }
 }
+
+export function interviewerAssigned(c, drive, interviewer, changed) {
+  return {
+    purpose: 'custom', to: c.email,
+    subject: changed ? `Your interviewer has changed: ${interviewer.name}` : `Your interviewer: ${interviewer.name}`,
+    body: wrap([
+      `Hi ${esc(c.full_name)},`,
+      changed ? `Your interviewer for <b>${esc(drive.name)}</b> has changed. You will now be interviewed by <b>${esc(interviewer.name)}</b>.`
+        : `You have been assigned to <b>${esc(interviewer.name)}</b> for your interview at <b>${esc(drive.name)}</b>.`,
+      c.queue_number ? `Your queue number is <b>#${c.queue_number}</b>.` : 'You will receive your queue number when you check in.',
+      `Please stay near ${esc(drive.venue || 'the interview area')}. We will call you when it is your turn.`,
+      'Regards,<br>The hiring team'])
+  }
+}

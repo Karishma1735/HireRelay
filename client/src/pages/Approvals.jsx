@@ -34,6 +34,7 @@ export default function Approvals() {
           <div className="flex flex-col gap-1.5 text-sm text-slate-600">
             {[['auto_queue_on_check_in', 'Add to queue automatically on check-in', 'Checking someone in puts them straight into the queue and gives them a queue number.'],
               ['auto_send_queue_emails', 'Auto-send the queue-number email', 'The candidate is emailed their queue number the moment they join the queue, without waiting for approval.'],
+              ['auto_send_assignment_emails', 'Auto-send an email when an interviewer is assigned', 'The candidate is told who will interview them as soon as you assign or change the interviewer.'],
               ['auto_send_confirmations', 'Auto-send registration confirmations', 'Registration confirmations are sent without waiting for approval. Reminders always need approval.']].map(([k, label, hint]) => (
               <label key={k} className="flex items-center gap-2" title={hint}><input type="checkbox" checked={!!(pending[k] ?? settings.data?.[k])} disabled={!settings.data} onChange={(e) => { setPending((p) => ({ ...p, [k]: e.target.checked })); auto.mutate({ [k]: e.target.checked }) }} /> {label}</label>))}
           </div>

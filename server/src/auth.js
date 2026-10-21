@@ -27,6 +27,14 @@ export async function localVerifier(token) {
   } catch { return null }
 }
 
+// Agent lookup tokens: short-lived, one user, read-only, and signed with a DIFFERENT key than login sessions,
+// so a leaked tool token can never be used to sign in and a session token is never accepted by the tool routes.
+const toolKey = () => `${sessionSecret()}:agent-tools`
+export const signToolToken = (userId) => jwt.sign({ sub: userId, aud: 'agent-tools' }, toolKey(), { algorithm: 'HS256', expiresIn: '10m' })
+export function verifyToolToken(token) {
+  try { return jwt.verify(token, toolKey(), { algorithms: ['HS256'], audience: 'agent-tools' }).sub } catch { return null }
+}
+
 export function hashPassword(password) {
   const salt = crypto.randomBytes(16)
   return `${salt.toString('hex')}:${crypto.scryptSync(password, salt, 64).toString('hex')}`

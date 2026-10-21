@@ -161,6 +161,7 @@ create table if not exists settings (
   owner_id text primary key references users(id) on delete cascade,
   auto_send_confirmations integer not null default 0,
   auto_queue_on_check_in integer not null default 1,
-  auto_send_queue_emails integer not null default 1
+  auto_send_queue_emails integer not null default 1,
+  auto_send_assignment_emails integer not null default 1
 );
 

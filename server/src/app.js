@@ -9,6 +9,7 @@ import { publicRoutes } from './routes/public.js'
 import { hrRoutes } from './routes/hr.js'
 import { viasocketRoutes } from './routes/viasocket.js'
 import { agentRoutes } from './routes/agent.js'
+import { agentToolRoutes } from './routes/agentTools.js'
 
 /** `verifyToken` is injectable so tests can exercise the API without a running Supabase Auth. */
 export function createApp({ verifyToken = localVerifier, staticDir } = {}) {
@@ -19,6 +20,7 @@ export function createApp({ verifyToken = localVerifier, staticDir } = {}) {
 
   app.use('/api', publicRoutes())
   app.use('/api', authRoutes())
+  app.use('/api', agentToolRoutes()) // authenticated by its own short-lived token, so it sits before the login gate
   const auth = requireAuth(verifyToken)
   app.use('/api', auth, hrRoutes())
   app.use('/api/viasocket', auth, viasocketRoutes())

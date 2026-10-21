@@ -9,7 +9,7 @@ import { approveAndExecute, requestApproval, retry } from '../lib/approvals.js'
 import { interviewReminder, feedbackReminder } from '../lib/emails.js'
 import { afterCandidateCreated } from './public.js'
 import { getSettings } from '../lib/settings.js'
-import { notifyQueued } from '../lib/queue.js'
+import { notifyQueued, notifyAssigned } from '../lib/queue.js'
 
 const uuid = z.string().uuid()
 const opt = (s) => s.optional().nullable().or(z.literal('').transform(() => null))
@@ -154,8 +154,13 @@ export function hrRoutes() {
   r.patch('/candidates/:id/interviewer', async (req, res) => {
     const { interviewer_id } = z.object({ interviewer_id: uuid.nullable() }).parse(req.body)
     if (interviewer_id && !(await one('select 1 from interviewers where id = $1 and owner_id = $2', [interviewer_id, owner(req)]))) return res.status(404).json({ error: 'Interviewer not found' })
-    const row = await one('update candidates set interviewer_id = $3, updated_at = now() where id = $1 and owner_id = $2 returning *', [uuid.parse(req.params.id), owner(req), interviewer_id])
-    row ? res.json(row) : res.status(404).json({ error: 'Candidate not found' })
+    const id = uuid.parse(req.params.id)
+    const before = await one('select interviewer_id from candidates where id = $1 and owner_id = $2', [id, owner(req)])
+    const row = await one('update candidates set interviewer_id = $3, updated_at = now() where id = $1 and owner_id = $2 returning *', [id, owner(req), interviewer_id])
+    if (!row) return res.status(404).json({ error: 'Candidate not found' })
+    // Tell the candidate who will interview them, when it is a new or changed assignment (not on removal or no-op saves).
+    if (interviewer_id && interviewer_id !== before.interviewer_id) await notifyAssigned(owner(req), row, interviewer_id, !!before.interviewer_id)
+    res.json(row)
   })
 
   r.post('/candidates/:id/feedback', async (req, res) => {
@@ -250,12 +255,12 @@ export function hrRoutes() {
   // ---------- settings ----------
   r.get('/settings', async (req, res) => res.json(await getSettings(owner(req))))
   r.put('/settings', async (req, res) => {
-    const b = z.object({ auto_send_confirmations: z.boolean().optional(), auto_queue_on_check_in: z.boolean().optional(), auto_send_queue_emails: z.boolean().optional() }).parse(req.body)
+    const b = z.object({ auto_send_confirmations: z.boolean().optional(), auto_queue_on_check_in: z.boolean().optional(), auto_send_queue_emails: z.boolean().optional(), auto_send_assignment_emails: z.boolean().optional() }).parse(req.body)
     const cur = { ...(await getSettings(owner(req))), ...b }
     await query(
-      `insert into settings (owner_id, auto_send_confirmations, auto_queue_on_check_in, auto_send_queue_emails) values ($1,$2,$3,$4)
-       on conflict (owner_id) do update set auto_send_confirmations = $2, auto_queue_on_check_in = $3, auto_send_queue_emails = $4`,
-      [owner(req), cur.auto_send_confirmations, cur.auto_queue_on_check_in, cur.auto_send_queue_emails])
+      `insert into settings (owner_id, auto_send_confirmations, auto_queue_on_check_in, auto_send_queue_emails, auto_send_assignment_emails) values ($1,$2,$3,$4,$5)
+       on conflict (owner_id) do update set auto_send_confirmations = $2, auto_queue_on_check_in = $3, auto_send_queue_emails = $4, auto_send_assignment_emails = $5`,
+      [owner(req), cur.auto_send_confirmations, cur.auto_queue_on_check_in, cur.auto_send_queue_emails, cur.auto_send_assignment_emails])
     res.json(cur)
   })
   return r

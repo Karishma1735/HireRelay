@@ -159,18 +159,16 @@ test('viaSocket handler is valid JavaScript with the key and drive baked in', ()
   assert.ok(code.includes(drive.id) && code.includes('x-hirerelay-ingest-key'))
 })
 
-test('agent snapshot and the queries it feeds run against real data', async () => {
+test('agent summary and proposal checks run against real data', async () => {
   const { buildSnapshot, validProposals } = await import('../src/lib/agent.js')
-  const { one } = await import('../src/db.js')
   const snap = await buildSnapshot(t.users.a.id)
-  assert.equal(snap.metrics.total, (await metrics()).total)
-  assert.ok(snap.waiting_list.length >= 1) // "Queue Person" is waiting from an earlier test
-  const w = snap.waiting_list[0]
-  const c = await one(`select c.*, json_object('name', d.name, 'role_title', d.role_title, 'venue', d.venue, 'drive_date', d.drive_date) as drive from candidates c join drives d on d.id = c.drive_id where c.id = $1 and c.owner_id = $2 and c.email is not null`, [w.id, t.users.a.id])
-  assert.equal(c.drive.name, 'Support Walk-in')
-  // Proposals pointing at rows that are not in the snapshot are dropped.
-  const kept = validProposals([{ type: 'interview_reminder', candidate_id: w.id }, { type: 'interview_reminder', candidate_id: 'made-up' }, { type: 'feedback_reminder', interviewer_id: 'nope' }], snap)
+  assert.equal(snap.totals.total, (await metrics()).total)
+  assert.ok(snap.waiting_now.length >= 1) // "Queue Person" is waiting from an earlier test
+  const w = snap.waiting_now[0]
+  // Proposals must point at real rows owned by this user, in the right state; anything else is dropped.
+  const kept = await validProposals(t.users.a.id, [{ type: 'interview_reminder', candidate_id: w.id }, { type: 'interview_reminder', candidate_id: 'made-up' }, { type: 'feedback_reminder', interviewer_id: 'nope' }])
   assert.equal(kept.length, 1)
+  assert.equal((await validProposals(t.users.b.id, [{ type: 'interview_reminder', candidate_id: w.id }])).length, 0) // another user's candidate
 })
 
 test('an email only counts as sent when Gmail returns a message id (viaSocket answers 200 even on app errors)', async () => {
@@ -386,3 +384,124 @@ test('a deleted Google Form candidate stays deleted, however often the same resp
   } finally { globalThis.fetch = realFetch; await query('delete from viasocket_subscriptions') }
 })
 let reply2
+
+test('assigning an interviewer emails the candidate (once per real change), and respects the setting', async () => {
+  const mail = async (cid) => (await t.a('GET', '/api/approvals')).body.filter((x) => x.candidate_id === cid && /nterviewer/.test(x.payload.subject))
+  const settle = async (cid, n) => { for (let i = 0; i < 30 && !((await mail(cid)).length === n && (await mail(cid)).every((m) => !['pending', 'approved'].includes(m.status) || m.status === 'pending')); i++) await new Promise((r) => setTimeout(r, 100)) }
+  const iv1 = (await t.a('POST', '/api/interviewers', { name: 'Assign One', email: 'a1@hr.test' })).body
+  const iv2 = (await t.a('POST', '/api/interviewers', { name: 'Assign Two' })).body
+  const c = (await t.a('POST', '/api/candidates', { drive_id: drive.id, full_name: 'Assign Me', email: 'assignme@example.com' })).body
+  const set = (who, iv) => t.a('PATCH', `/api/candidates/${c.id}/interviewer`, { interviewer_id: iv })
+  assert.equal((await mail(c.id)).length, 0)
+  assert.equal((await set('a', iv1.id)).status, 200)
+  let m = await mail(c.id); assert.equal(m.length, 1)
+  assert.equal(m[0].payload.to, 'assignme@example.com'); assert.match(m[0].payload.subject, /Your interviewer: Assign One/); assert.match(m[0].payload.body, /Assign One/)
+  await settle(c.id, 1); m = await mail(c.id)
+  assert.equal(m[0].status, 'failed'); assert.match(m[0].error, /Gmail is not connected/) // auto-sent (default); no Gmail in tests, so it fails honestly
+  await set('a', iv1.id); assert.equal((await mail(c.id)).length, 1)               // same interviewer again: no second email
+  await set('a', iv2.id); m = await mail(c.id); assert.equal(m.length, 2)
+  assert.ok(m.some((x) => /has changed: Assign Two/.test(x.payload.subject)))      // a change says so
+  await set('a', null); assert.equal((await mail(c.id)).length, 2)                 // removing an interviewer: nothing to say
+  // Setting off: the email waits for approval instead of going out.
+  await t.a('PUT', '/api/settings', { auto_send_assignment_emails: false })
+  await set('a', iv1.id)
+  const waiting = (await mail(c.id)).filter((x) => x.status === 'pending'); assert.equal(waiting.length, 1)
+  await t.a('PUT', '/api/settings', { auto_send_assignment_emails: true })
+  // No email address, or an interview already finished: no email.
+  const noMail = (await t.a('POST', '/api/candidates', { drive_id: drive.id, full_name: 'No Mail Person', phone: '9222222222' })).body
+  await t.a('PATCH', `/api/candidates/${noMail.id}/interviewer`, { interviewer_id: iv1.id })
+  assert.equal((await t.a('GET', '/api/approvals')).body.some((x) => x.candidate_id === noMail.id), false)
+  const done = (await t.a('POST', '/api/candidates', { drive_id: drive.id, full_name: 'Done Person', email: 'doneperson@example.com' })).body
+  await t.a('PATCH', `/api/candidates/${done.id}/interviewer`, { interviewer_id: iv2.id })
+  const before = (await mail(done.id)).length
+  for (const s of ['checked_in', 'in_interview', 'completed']) await t.a('POST', `/api/candidates/${done.id}/stage`, { stage: s })
+  await t.a('PATCH', `/api/candidates/${done.id}/interviewer`, { interviewer_id: iv1.id })
+  assert.equal((await mail(done.id)).length, before)
+})
+
+
+// ---------- agent lookup tools ----------
+const tool = (token, name, body = {}) => fetch(`${t.base}/api/agent-tools/${name}`, { method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, body: await r.json() }))
+
+test('agent tools: only a valid tool token works, never a login session, and never across users', async () => {
+  const { signToolToken } = await import('../src/auth.js')
+  const jwt = (await import('jsonwebtoken')).default
+  const tokenA = signToolToken(t.users.a.id)
+  assert.equal((await tool(null, 'get_overview')).status, 401)
+  assert.equal((await tool('garbage', 'get_overview')).status, 401)
+  const session = (await t.anon('POST', '/api/auth/login', { email: 'a@hr.test', password: 'correct-horse-9' })).body.token
+  assert.equal((await tool(session, 'get_overview')).status, 401)                                  // a login session is not a tool token
+  const login = await t.anon('GET', '/api/drives', undefined, { authorization: `Bearer ${tokenA}` })
+  assert.equal(login.status, 401)                                                                  // and a tool token is not a login
+  const expired = jwt.sign({ sub: t.users.a.id, aud: 'agent-tools', exp: Math.floor(Date.now() / 1000) - 5 }, 'x')
+  assert.equal((await tool(expired, 'get_overview')).status, 401)
+  assert.equal((await tool(tokenA, 'nope')).status, 404)
+  assert.equal((await tool(tokenA, 'constructor')).status, 404)
+  assert.equal((await tool(tokenA, 'get_overview')).status, 200)
+  const a = (await tool(tokenA, 'search_candidates', { limit: 50 })).body, b = (await tool(signToolToken(t.users.b.id), 'search_candidates', { limit: 50 })).body
+  assert.ok(a.total_matching > 0); assert.equal(b.total_matching, 0)                               // user B sees none of A's candidates
+  assert.equal((await tool(tokenA, 'search_candidates', { stage: 'bogus' })).status, 400)          // bad arguments are explained, not crashed on
+})
+
+test('agent tools answer the questions the old summary could not', async () => {
+  const { signToolToken } = await import('../src/auth.js')
+  const tok = signToolToken(t.users.a.id)
+  const mk = async (name) => (await t.a('POST', '/api/candidates', { drive_id: drive.id, full_name: name, email: `${name.replace(/\s/g, '').toLowerCase()}@example.com` })).body
+  const iv = (await t.a('POST', '/api/interviewers', { name: 'Tool Panelist', email: 'toolp@hr.test' })).body
+  const [x, y] = [await mk('Reject First'), await mk('Reject Latest')]
+  for (const c of [x, y]) { await t.a('PATCH', `/api/candidates/${c.id}/interviewer`, { interviewer_id: iv.id }); for (const st of ['checked_in', 'in_interview', 'completed']) await t.a('POST', `/api/candidates/${c.id}/stage`, { stage: st }) }
+  await t.a('POST', `/api/candidates/${x.id}/stage`, { stage: 'rejected' })
+  await new Promise((r) => setTimeout(r, 15))
+  await t.a('POST', `/api/candidates/${y.id}/stage`, { stage: 'rejected' })
+  await t.a('POST', `/api/candidates/${y.id}/feedback`, { rating: 2, recommendation: 'reject', notes: 'Not a fit for support' })
+
+  // "give me the latest rejected candidate"
+  const latest = (await tool(tok, 'search_candidates', { stage: 'rejected', limit: 1 })).body
+  assert.equal(latest.total_matching, 2); assert.equal(latest.candidates[0].name, 'Reject Latest'); assert.equal(latest.candidates[0].interviewer, 'Tool Panelist')
+  assert.equal(latest.candidates[0].recommendation, 'reject')
+  // by name, by interviewer, by feedback state, by registration date, "no interviewer"
+  assert.equal((await tool(tok, 'search_candidates', { query: 'reject f' })).body.candidates[0].name, 'Reject First')
+  assert.equal((await tool(tok, 'search_candidates', { interviewer: 'tool pan' })).body.total_matching, 2)
+  assert.deepEqual((await tool(tok, 'search_candidates', { feedback: 'pending', interviewer: 'Tool' })).body.candidates.map((c) => c.name), ['Reject First'])
+  assert.ok((await tool(tok, 'search_candidates', { registered_since: '2999-01-01' })).body.total_matching === 0)
+  assert.ok((await tool(tok, 'search_candidates', { interviewer: 'none' })).body.candidates.every((c) => c.interviewer === null))
+  assert.equal((await tool(tok, 'search_candidates', { stage: '', drive: '', limit: '3' })).body.returned, 3)       // empty strings and numeric strings from the model are fine
+  // one candidate in full: answers, feedback, emails
+  const one = (await tool(tok, 'get_candidate', { name: 'Reject Latest' })).body
+  assert.equal(one.found, true); assert.equal(one.feedback.notes, 'Not a fit for support'); assert.ok(Array.isArray(one.emails))
+  assert.equal((await tool(tok, 'get_candidate', { name: 'Reject' })).body.found, false)                           // two matches: asks which one
+  assert.equal((await tool(tok, 'get_candidate', { name: 'Nobody Here' })).body.found, false)
+  assert.equal((await tool(tok, 'get_candidate', { candidate_id: y.id })).body.candidate.name, 'Reject Latest')
+  // the rest of the toolbox
+  assert.ok((await tool(tok, 'list_feedback', { recommendation: 'reject' })).body.feedback.some((f) => f.candidate === 'Reject Latest'))
+  const drives = (await tool(tok, 'list_drives')).body.drives; assert.ok(drives[0].rejected >= 2 && drives[0].candidates >= 2)
+  assert.ok((await tool(tok, 'list_interviewers')).body.interviewers.some((i) => i.name === 'Tool Panelist' && i.assigned === 2 && i.feedback_owed === 1))
+  assert.ok(Array.isArray((await tool(tok, 'list_emails', { status: 'failed' })).body.emails))
+  assert.ok((await tool(tok, 'recent_activity')).body.activity.every((e) => e.candidate || e.outcome === 'rejected'))
+  const ov = (await tool(tok, 'get_overview')).body; assert.equal(ov.by_stage.rejected, 2)
+})
+
+test('the agent request carries the tools, a short-lived token for this user, and a natural prompt', async () => {
+  const { verifyToolToken } = await import('../src/auth.js')
+  process.env.VIASOCKET_EMBED_SECRET = 'unit-test-secret'; process.env.HIRERELAY_PUBLIC_URL = 'https://hirerelay.example.test'
+  const realFetch = globalThis.fetch; let sent
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('/embed/ai/message')) { sent = JSON.parse(init.body); return new Response(JSON.stringify({ success: true, data: { content: JSON.stringify({ answer: 'Reject Latest was the most recent rejection.', recommendations: [], proposed_actions: [{ type: 'interview_reminder', candidate_id: 'made-up', interviewer_id: null, reason: 'x' }] }) } }), { status: 200 }) }
+    return realFetch(url, init)
+  }
+  try {
+    const r = await t.a('POST', '/api/agent/message', { message: 'give me the latest rejected candidate', thread_id: 'toolcheck' })
+    assert.equal(r.status, 200); assert.match(r.body.answer, /Reject Latest/)
+    assert.deepEqual(r.body.queued_approvals, [])                                                    // a made-up id never becomes an email
+    const names = sent.extra_tools.map((x) => x.name)
+    for (const n of ['search_candidates', 'get_candidate', 'list_feedback', 'list_drives', 'list_interviewers', 'list_emails', 'recent_activity', 'get_overview']) assert.ok(names.includes(n), n)
+    assert.ok(sent.extra_tools.every((x) => x.url.startsWith('https://hirerelay.example.test/api/agent-tools/') && x.method === 'POST'))
+    assert.equal(verifyToolToken(sent.extra_tools[0].headers.Authorization.replace('Bearer ', '')), t.users.a.id)  // token belongs to the asker
+    assert.ok(sent.extra_tools.length <= 20)
+    assert.doesNotMatch(sent.prompt, /live data snapshot/i); assert.match(sent.prompt, /Never mention/); assert.match(sent.message, /^give me the latest rejected candidate/)
+    assert.equal(sent.response_type, 'json_schema')
+    // Without a public address (local development) it still answers, from the summary alone.
+    delete process.env.HIRERELAY_PUBLIC_URL; sent = null
+    assert.equal((await t.a('POST', '/api/agent/message', { message: 'hi', thread_id: 'toolcheck' })).status, 200); assert.equal(sent.extra_tools, undefined)
+  } finally { globalThis.fetch = realFetch; delete process.env.VIASOCKET_EMBED_SECRET; delete process.env.HIRERELAY_PUBLIC_URL }
+})
