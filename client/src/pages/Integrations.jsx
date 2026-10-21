@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, RefreshCw } from 'lucide-react'
 import { get, post, put, del } from '../lib/api.js'
@@ -63,6 +64,7 @@ export default function Integrations() {
               {app.connected && <Button variant="danger" loading={disconnect.isPending} onClick={() => confirm(`Disconnect ${app.name}? Flows built on it stop.`) && disconnect.mutate(app.service_id)}>Disconnect</Button>}
             </div>
             {app.name === 'Gmail' && app.connected && !app.expired && <SenderPicker current={app.config?.from} />}
+            {app.name === 'Google Forms' && app.connected && !app.expired && <DriveForms />}
           </Card>))}
       </div>
       <Card title="Connect any other app (prebuilt viaSocket UI)">
@@ -101,4 +103,36 @@ function PrebuiltUI({ token }) {
     return () => { try { embed?.destroy?.() } catch { /* already gone */ } }
   }, [token])
   return <>{err && <Alert>{err}</Alert>}<div ref={ref} style={{ height: 640 }} className="overflow-hidden rounded-lg border border-slate-200" /></>
+}
+
+/** Each hiring drive is fed by one Google Form, chosen from the user's own account. */
+function DriveForms() {
+  const qc = useQueryClient(); const [error, setError] = useState(''); const [picked, setPicked] = useState({})
+  const drives = useQuery({ queryKey: ['drives'], queryFn: () => get('/drives') })
+  const forms = useQuery({ queryKey: ['vs-forms'], queryFn: () => get('/viasocket/forms'), retry: false })
+  const done = () => { setError(''); qc.invalidateQueries({ queryKey: ['drives'] }); qc.invalidateQueries({ queryKey: ['drive'] }) }
+  const start = useMutation({ mutationFn: (driveId) => post(`/viasocket/drives/${driveId}/google-form`, { form_id: picked[driveId] }), onSuccess: done, onError: (e) => setError(e.message) })
+  const stop = useMutation({ mutationFn: (driveId) => del(`/viasocket/drives/${driveId}/google-form`), onSuccess: done, onError: (e) => setError(e.message) })
+  return (
+    <div className="mt-4 space-y-3 border-t pt-3">
+      <div className="text-xs font-medium text-slate-600">Which form feeds which hiring drive</div>
+      {drives.isLoading || forms.isLoading ? <p className="text-sm text-slate-500">Loading your drives and forms…</p>
+        : forms.isError ? <Alert>{forms.error.message}</Alert>
+        : !drives.data?.length ? <p className="text-sm text-slate-600">Create a hiring drive first, then pick its form here. <Link className="font-medium text-indigo-600" to="/drives">Go to drives</Link></p>
+        : !forms.data?.length ? <p className="text-sm text-slate-600">No Google Forms found in this Google account. Create a form in Google Forms, then reload this page.</p>
+        : drives.data.map((d) => (
+          <div key={d.id} className="space-y-1.5 rounded-lg border border-slate-200 p-2.5">
+            <div className="flex items-center justify-between gap-2 text-sm"><Link to={`/drives/${d.id}`} className="font-medium hover:text-indigo-700">{d.name}</Link>
+              {d.google_form_connected && <Badge tone="green">Syncing</Badge>}</div>
+            {d.google_form_connected ? <Button size="sm" variant="danger" loading={stop.isPending && stop.variables === d.id} onClick={() => stop.mutate(d.id)}>Stop syncing</Button> : (
+              <div className="flex gap-2">
+                <select className="input !py-1.5 !text-sm" value={picked[d.id] || ''} onChange={(e) => setPicked({ ...picked, [d.id]: e.target.value })} aria-label={`Google Form for ${d.name}`}>
+                  <option value="">Select a form…</option>{forms.data.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                <Button size="sm" disabled={!picked[d.id]} loading={start.isPending && start.variables === d.id} onClick={() => start.mutate(d.id)}>Start syncing</Button>
+              </div>)}
+          </div>))}
+      {error && <Alert>{error}</Alert>}
+    </div>
+  )
 }
