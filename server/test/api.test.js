@@ -247,3 +247,25 @@ test('check-in joins the queue and emails the queue number; both behaviours are 
   assert.equal((await t.a('GET', '/api/settings')).body.auto_queue_on_check_in, true)
   assert.equal((await t.b('GET', '/api/settings')).body.auto_queue_on_check_in, true) // other users unaffected
 })
+
+test('interviewers report live counts and filter their own candidates', async () => {
+  const iv = (await t.a('POST', '/api/interviewers', { name: 'Counts Panelist', email: 'counts@hr.test' })).body
+  const other = (await t.a('POST', '/api/interviewers', { name: 'Other Panelist' })).body
+  const mk = async (name) => (await t.a('POST', '/api/candidates', { drive_id: drive.id, full_name: name, email: `${name.replace(/\s/g, '').toLowerCase()}@example.com` })).body
+  const people = [await mk('Count A'), await mk('Count B'), await mk('Count C'), await mk('Count D')]
+  for (const c of people) await t.a('PATCH', `/api/candidates/${c.id}/interviewer`, { interviewer_id: iv.id })
+  await t.a('PATCH', `/api/candidates/${people[3].id}/interviewer`, { interviewer_id: other.id }) // belongs to someone else
+  const stage = (c, s) => t.a('POST', `/api/candidates/${c.id}/stage`, { stage: s })
+  await stage(people[0], 'checked_in')                      // auto-queued -> waiting
+  await stage(people[1], 'checked_in'); await stage(people[1], 'in_interview')
+  await stage(people[2], 'checked_in'); await stage(people[2], 'in_interview'); await stage(people[2], 'completed') // done, feedback due
+  const stats = (await t.a('GET', `/api/interviewers/${iv.id}`)).body
+  assert.deepEqual([stats.assigned, stats.waiting, stats.in_interview, stats.interviewed, stats.feedback_due], [3, 1, 1, 1, 1])
+  await t.a('POST', `/api/candidates/${people[2].id}/feedback`, { rating: 5, recommendation: 'hire' })
+  assert.equal((await t.a('GET', `/api/interviewers/${iv.id}`)).body.feedback_due, 0)
+  assert.equal((await t.a('GET', '/api/interviewers')).body.find((x) => x.id === iv.id).assigned, 3) // list shows the same numbers
+  const mine = (await t.a('GET', `/api/candidates?interviewer_id=${iv.id}`)).body
+  assert.deepEqual(mine.map((c) => c.full_name).sort(), ['Count A', 'Count B', 'Count C'])
+  assert.equal((await t.b('GET', `/api/interviewers/${iv.id}`)).status, 404) // another HR user cannot see it
+  assert.equal((await t.b('GET', `/api/candidates?interviewer_id=${iv.id}`)).body.length, 0)
+})

@@ -6,21 +6,24 @@ import { get, post, patch, del } from '../lib/api.js'
 import { STAGE_LABEL } from '../lib/format.js'
 import { Alert, Button, Empty, Field, Modal, Spinner, StageBadge } from './ui.jsx'
 
+// The 'Check in' label is swapped for 'Check in & queue' at render time when auto-queue is on.
 const NEXT = {
-  registered: [['checked_in', 'Check in']], // label becomes "Check in & queue" when auto-queue is on checked_in: [['waiting', 'Add to queue']], waiting: [['in_interview', 'Start interview']],
+  registered: [['checked_in', 'Check in']],
+  checked_in: [['waiting', 'Add to queue']],
+  waiting: [['in_interview', 'Start interview']],
   in_interview: [['completed', 'Complete']], completed: [['selected', 'Select'], ['rejected', 'Reject']], no_show: [['registered', 'Reopen']]
 }
 const CAN_NO_SHOW = new Set(['registered', 'checked_in', 'waiting'])
 
-export default function CandidateTable({ driveId, initialPendingFeedback = false }) {
+export default function CandidateTable({ driveId, interviewerId, initialPendingFeedback = false }) {
   const qc = useQueryClient()
   const [q, setQ] = useState(''); const [stage, setStage] = useState(''); const [pendingFb, setPendingFb] = useState(initialPendingFeedback)
   const [driveFilter, setDriveFilter] = useState('')
   const [open, setOpen] = useState(null); const [error, setError] = useState(''); const [sel, setSel] = useState(new Set())
-  const params = new URLSearchParams({ ...((driveId || driveFilter) && { drive_id: driveId || driveFilter }), ...(stage && { stage }), ...(q && { q }), ...(pendingFb && { pending_feedback: '1' }) })
+  const params = new URLSearchParams({ ...((driveId || driveFilter) && { drive_id: driveId || driveFilter }), ...(interviewerId && { interviewer_id: interviewerId }), ...(stage && { stage }), ...(q && { q }), ...(pendingFb && { pending_feedback: '1' }) })
   const list = useQuery({ queryKey: ['candidates', params.toString()], queryFn: () => get(`/candidates?${params}`), refetchInterval: 5000 })
   const ivs = useQuery({ queryKey: ['interviewers'], queryFn: () => get('/interviewers') })
-  const refresh = () => { qc.invalidateQueries({ queryKey: ['candidates'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); qc.invalidateQueries({ queryKey: ['drives'] }) }
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['candidates'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); qc.invalidateQueries({ queryKey: ['drives'] }); qc.invalidateQueries({ queryKey: ['interviewers'] }); qc.invalidateQueries({ queryKey: ['interviewer'] }) }
   const move = useMutation({ mutationFn: ({ id, stage }) => post(`/candidates/${id}/stage`, { stage }), onSuccess: () => { setError(''); refresh() }, onError: (e) => setError(e.message) })
   const assign = useMutation({ mutationFn: ({ id, interviewer_id }) => patch(`/candidates/${id}/interviewer`, { interviewer_id: interviewer_id || null }), onSuccess: refresh, onError: (e) => setError(e.message) })
   const remove = useMutation({

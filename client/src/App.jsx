@@ -9,6 +9,7 @@ import Drives from './pages/Drives.jsx'
 import DriveDetail from './pages/DriveDetail.jsx'
 import Candidates from './pages/Candidates.jsx'
 import Interviewers from './pages/Interviewers.jsx'
+import InterviewerDetail from './pages/InterviewerDetail.jsx'
 import Agent from './pages/Agent.jsx'
 import Approvals from './pages/Approvals.jsx'
 import Integrations from './pages/Integrations.jsx'
@@ -26,6 +27,7 @@ export default function App() {
             <Route path="drives/:id" element={<DriveDetail />} />
             <Route path="candidates" element={<Candidates />} />
             <Route path="interviewers" element={<Interviewers />} />
+            <Route path="interviewers/:id" element={<InterviewerDetail />} />
             <Route path="agent" element={<Agent />} />
             <Route path="approvals" element={<Approvals />} />
             <Route path="integrations" element={<Integrations />} />

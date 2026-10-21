@@ -58,9 +58,20 @@ export function hrRoutes() {
   })
 
   // ---------- interviewers ----------
+  // Same live numbers for every interviewer, computed from the candidates they are assigned to.
+  const INTERVIEWER_STATS = `
+    (select count(*) from candidates c where c.interviewer_id = i.id) as assigned,
+    (select count(*) from candidates c where c.interviewer_id = i.id and c.stage = 'waiting') as waiting,
+    (select count(*) from candidates c where c.interviewer_id = i.id and c.stage = 'in_interview') as in_interview,
+    (select count(*) from candidates c where c.interviewer_id = i.id and c.interview_completed_at is not null) as interviewed,
+    (select count(*) from candidates c left join feedback f on f.candidate_id = c.id
+       where c.interviewer_id = i.id and c.interview_completed_at is not null and f.id is null) as feedback_due`
   r.get('/interviewers', async (req, res) => res.json(await many(
-    `select i.*, (select count(*) from candidates c where c.interviewer_id = i.id and c.stage = 'in_interview') as in_interview
-     from interviewers i where owner_id = $1 order by name`, [owner(req)])))
+    `select i.*, ${INTERVIEWER_STATS} from interviewers i where i.owner_id = $1 order by i.active desc, i.name`, [owner(req)])))
+  r.get('/interviewers/:id', async (req, res) => {
+    const row = await one(`select i.*, ${INTERVIEWER_STATS} from interviewers i where i.id = $1 and i.owner_id = $2`, [uuid.parse(req.params.id), owner(req)])
+    row ? res.json(row) : res.status(404).json({ error: 'Interviewer not found' })
+  })
   r.post('/interviewers', async (req, res) => {
     const b = z.object({ name: z.string().trim().min(2).max(120), email: opt(z.string().email()) }).parse(req.body)
     res.status(201).json(await one(`insert into interviewers (owner_id, name, email) values ($1,$2,$3) returning *`, [owner(req), b.name, b.email ?? null]))
@@ -75,16 +86,16 @@ export function hrRoutes() {
 
   // ---------- candidates ----------
   r.get('/candidates', async (req, res) => {
-    const q = z.object({ drive_id: uuid.optional(), stage: z.enum(STAGES).optional(), q: z.string().max(100).optional(), pending_feedback: z.enum(['1']).optional(), limit: z.coerce.number().int().min(1).max(500).default(200) }).parse(req.query)
+    const q = z.object({ drive_id: uuid.optional(), interviewer_id: uuid.optional(), stage: z.enum(STAGES).optional(), q: z.string().max(100).optional(), pending_feedback: z.enum(['1']).optional(), limit: z.coerce.number().int().min(1).max(500).default(200) }).parse(req.query)
     res.json(await many(
       `select c.*, d.name as drive_name, i.name as interviewer_name, (f.id is not null) as has_feedback
        from candidates c join drives d on d.id = c.drive_id
        left join interviewers i on i.id = c.interviewer_id left join feedback f on f.candidate_id = c.id
-       where c.owner_id = $1 and ($2 is null or c.drive_id = $2) and ($3 is null or c.stage = $3)
+       where c.owner_id = $1 and ($2 is null or c.drive_id = $2) and ($3 is null or c.stage = $3) and ($7 is null or c.interviewer_id = $7)
          and ($4 is null or c.full_name like '%'||$4||'%' or c.email like '%'||$4||'%' or c.phone like '%'||$4||'%')
          and ($5 is null or (c.interview_completed_at is not null and f.id is null))
        order by case c.stage when 'in_interview' then 0 when 'waiting' then 1 else 2 end, c.queue_number nulls last, c.created_at desc limit $6`,
-      [owner(req), q.drive_id ?? null, q.stage ?? null, q.q ?? null, q.pending_feedback === '1' ? true : null, q.limit]))
+      [owner(req), q.drive_id ?? null, q.stage ?? null, q.q ?? null, q.pending_feedback === '1' ? true : null, q.limit, q.interviewer_id ?? null]))
   })
 
   r.get('/candidates/:id', async (req, res) => {
