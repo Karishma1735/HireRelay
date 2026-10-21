@@ -105,13 +105,7 @@ function CandidateModal({ id, onClose }) {
                 <Field label="Recommendation"><select className="input" value={fb.recommendation} onChange={(e) => setFb({ ...fb, recommendation: e.target.value })}><option value="hire">Hire</option><option value="hold">Hold</option><option value="reject">Reject</option></select></Field>
               </div>
               <Field label="Notes"><textarea className="input" rows={3} value={fb.notes} onChange={(e) => setFb({ ...fb, notes: e.target.value })} /></Field>
-              {error && <Alert>{error}</Alert>}
-      {sel.size > 0 && (
-        <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-          <span>{sel.size} selected</span>
-          <div className="flex gap-2"><Button size="sm" variant="ghost" onClick={() => setSel(new Set())}>Clear</Button>
-            <Button size="sm" variant="danger" loading={remove.isPending} onClick={() => askDelete([...sel], `${sel.size} candidate${sel.size > 1 ? 's' : ''}`)}>Delete selected</Button></div>
-        </div>)}<Button loading={save.isPending}>Save feedback</Button></form>)}
+              {error && <Alert>{error}</Alert>}<Button loading={save.isPending}>Save feedback</Button></form>)}
         </div>
       </div>)}
     </Modal>

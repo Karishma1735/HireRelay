@@ -1,0 +1,1 @@
+{"root":true,"parserOptions":{"ecmaVersion":2022,"sourceType":"module","ecmaFeatures":{"jsx":true}},"env":{"browser":true,"es2022":true},"plugins":[],"rules":{"no-undef":"error","no-unused-vars":"off"}}
