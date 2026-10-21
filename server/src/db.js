@@ -1,12 +1,17 @@
-import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import Database from 'better-sqlite3'
+import sqlite from 'node-sqlite3-wasm' // SQLite compiled to WebAssembly: no native addon to mismatch with the host
+
+const { Database } = sqlite
 import { config } from './config.js'
 
 // SQLite under DATA_DIR: the one file survives redeploys. DB_MEMORY=1 keeps it in memory (tests).
-const schema = fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../schema.sql'), 'utf8')
+// `now()` and `gen_uuid()` are written in the SQL and expanded here to plain SQLite expressions.
+const NOW = "strftime('%Y-%m-%dT%H:%M:%fZ','now')"
+const UUID = "lower(hex(randomblob(4)))||'-'||lower(hex(randomblob(2)))||'-4'||substr(lower(hex(randomblob(2))),2)||'-a'||substr(lower(hex(randomblob(2))),2)||'-'||lower(hex(randomblob(6)))"
+const expand = (sql) => sql.replace(/\bnow\(\)/g, NOW).replace(/\bgen_uuid\(\)/g, UUID)
+const schema = expand(fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../schema.sql'), 'utf8'))
 
 // Columns stored as JSON text / 0-1 integers, converted back on the way out.
 const JSON_COLS = new Set(['field_map', 'extra', 'payload', 'request', 'response', 'config', 'input_data', 'drive'])
@@ -18,22 +23,21 @@ export function getDb() {
   let file = ':memory:'
   if (!process.env.DB_MEMORY) { fs.mkdirSync(config.dataDir, { recursive: true }); file = path.join(config.dataDir, 'hirerelay.db') }
   db = new Database(file)
-  db.pragma('journal_mode = WAL'); db.pragma('foreign_keys = ON')
-  db.function('now', () => new Date().toISOString())
-  db.function('gen_uuid', () => crypto.randomUUID())
+  db.exec('pragma foreign_keys = ON')
   db.exec(schema)
   return db
 }
 export function closeDb() { if (db) { db.close(); db = undefined; cache.clear() } }
 
 const cache = new Map()
+const returnsRows = (sql) => /^\s*(select|with|pragma)\b/i.test(sql) || /\breturning\b/i.test(sql)
 /** `$1`-style numbered parameters (reusable) become positional `?`, with arguments in order of appearance. */
 function compile(text) {
   let c = cache.get(text)
   if (!c) {
     const order = []
     const sql = text.replace(/\$(\d+)/g, (_, n) => { order.push(Number(n) - 1); return '?' })
-    c = { stmt: getDb().prepare(sql), order }
+    c = { sql: expand(sql), order, reader: returnsRows(sql) }
     cache.set(text, c)
   }
   return c
@@ -49,13 +53,14 @@ function fromDb(row) {
 }
 
 export async function query(text, params = []) {
-  const { stmt, order } = compile(text)
+  const { sql, order, reader } = compile(text)
   const args = order.map((i) => toDb(params[i]))
+  const d = getDb()
   try {
-    if (stmt.reader) return { rows: stmt.all(...args).map(fromDb) }
-    stmt.run(...args); return { rows: [] }
+    if (reader) return { rows: d.all(sql, args).map(fromDb) }
+    d.run(sql, args); return { rows: [] }
   } catch (e) {
-    if (String(e.code).startsWith('SQLITE_CONSTRAINT_UNIQUE') || e.code === 'SQLITE_CONSTRAINT_PRIMARYKEY') e.code = '23505' // keep the existing unique-violation handling
+    if (/UNIQUE constraint failed/i.test(e.message)) e.code = '23505' // keep the existing unique-violation handling
     throw e
   }
 }
