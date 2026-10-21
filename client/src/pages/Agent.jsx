@@ -23,7 +23,8 @@ export default function Agent() {
   const hist = useQuery({ queryKey: ['agent-history', tid], queryFn: () => get(`/agent/history/${tid}`), enabled: !!vs.data?.configured, retry: false })
   useEffect(() => {
     // viaSocket keeps the thread; the stored user turn embeds the data snapshot, so show only the question.
-    if (hist.data?.messages) setMsgs(hist.data.messages.map((m) => ({ role: m.role, at: m.created_at, text: m.role === 'user' ? String(m.content).split('\n\nLive data snapshot')[0].replace(/^HR question: /, '') : safeAnswer(m.content) })))
+    // Only fill an empty screen: history can arrive after the user already sent something, and must not wipe it.
+    if (hist.data?.messages) setMsgs((cur) => cur.length ? cur : hist.data.messages.map((m) => ({ role: m.role, at: m.created_at, text: m.role === 'user' ? String(m.content).split('\n\nLive data snapshot')[0].replace(/^HR question: /, '') : safeAnswer(m.content) })))
   }, [hist.data])
 
   const ask = useMutation({
@@ -45,7 +46,7 @@ export default function Agent() {
     setText(''); ask.mutate(v); input.current?.focus()
   }
   const blocked = vs.data && !vs.data.configured
-  const loadingHistory = hist.isLoading && vs.data?.configured
+  const loadingHistory = hist.isLoading && vs.data?.configured && !msgs.length
 
   return (
     <div className="flex h-[calc(100vh-6rem)] flex-col lg:h-[calc(100vh-4rem)]">
