@@ -7,7 +7,7 @@ import { STAGE_LABEL } from '../lib/format.js'
 import { Alert, Button, Empty, Field, Modal, Spinner, StageBadge } from './ui.jsx'
 
 const NEXT = {
-  registered: [['checked_in', 'Check in']], checked_in: [['waiting', 'Add to queue']], waiting: [['in_interview', 'Start interview']],
+  registered: [['checked_in', 'Check in']], // label becomes "Check in & queue" when auto-queue is on checked_in: [['waiting', 'Add to queue']], waiting: [['in_interview', 'Start interview']],
   in_interview: [['completed', 'Complete']], completed: [['selected', 'Select'], ['rejected', 'Reject']], no_show: [['registered', 'Reopen']]
 }
 const CAN_NO_SHOW = new Set(['registered', 'checked_in', 'waiting'])
@@ -30,6 +30,8 @@ export default function CandidateTable({ driveId, initialPendingFeedback = false
   const askDelete = (ids, label) => confirm(`Delete ${label}? Their feedback and any email waiting for approval are deleted too. This cannot be undone.`) && remove.mutate(ids)
   const toggle = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const rows = list.data || []
+  const settings = useQuery({ queryKey: ['settings'], queryFn: () => get('/settings') })
+  const autoQueue = settings.data?.auto_queue_on_check_in !== false
   const activeIvs = (ivs.data || []).filter((i) => i.active)
 
   const drives = useQuery({ queryKey: ['drives'], queryFn: () => get('/drives'), enabled: !driveId })
@@ -56,9 +58,9 @@ export default function CandidateTable({ driveId, initialPendingFeedback = false
           <option value="">Unassigned</option>{activeIvs.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
         </select></td>
       <td className="px-3 py-2"><div className="flex justify-end gap-1.5">
-        {(NEXT[c.stage] || []).map(([to, label]) => (
+        {(NEXT[c.stage] || []).map(([to, label0]) => { const label = to === 'checked_in' && autoQueue ? 'Check in & queue' : label0; return (
           <Button key={to} size="sm" variant={to === 'rejected' ? 'danger' : 'secondary'} disabled={to === 'in_interview' && !c.interviewer_id} title={to === 'in_interview' && !c.interviewer_id ? 'Assign an interviewer first' : undefined}
-            loading={move.isPending && move.variables?.id === c.id && move.variables?.stage === to} onClick={() => move.mutate({ id: c.id, stage: to })}>{label}</Button>))}
+            loading={move.isPending && move.variables?.id === c.id && move.variables?.stage === to} onClick={() => move.mutate({ id: c.id, stage: to })}>{label}</Button>) })}
         {c.interview_completed_at && !c.has_feedback && <Button size="sm" onClick={() => setOpen(c.id)}>Feedback</Button>}
         {CAN_NO_SHOW.has(c.stage) && <Button size="sm" variant="ghost" onClick={() => move.mutate({ id: c.id, stage: 'no_show' })}>No show</Button>}
         <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => askDelete([c.id], c.full_name)} aria-label={`Delete ${c.full_name}`}><Trash2 className="h-3.5 w-3.5" /></Button>

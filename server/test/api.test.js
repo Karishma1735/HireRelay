@@ -56,8 +56,9 @@ test('form sync never overwrites HR-managed state', async () => {
   const c = list[0]
   assert.equal(c.stage, 'registered')
   const iv = (await t.a('POST', '/api/interviewers', { name: 'Ivan', email: 'ivan@hr.test' })).body
-  assert.equal((await t.a('POST', `/api/candidates/${c.id}/stage`, { stage: 'checked_in' })).status, 200)
-  assert.equal((await t.a('POST', `/api/candidates/${c.id}/stage`, { stage: 'waiting' })).body.queue_number, 1)
+  // Default behaviour: checking in puts the candidate straight into the queue.
+  const checkedIn = await t.a('POST', `/api/candidates/${c.id}/stage`, { stage: 'checked_in' })
+  assert.equal(checkedIn.status, 200); assert.equal(checkedIn.body.stage, 'waiting'); assert.equal(checkedIn.body.queue_number, 1)
   assert.equal((await t.a('PATCH', `/api/candidates/${c.id}/interviewer`, { interviewer_id: iv.id })).status, 200)
   // The form is re-submitted with changed data, including a new company: only blanks are filled.
   await ingest({ responseId: 'resp-9', Full_Name: 'Changed Name', Email: 'asha@example.com', Company: 'NewCo' })
@@ -121,7 +122,7 @@ test('registration confirmations wait for approval; execution fails honestly wit
 
 test('prepare reminders queues approvals once, from real rows', async () => {
   const c = (await t.a('POST', '/api/candidates', { drive_id: drive.id, full_name: 'Queue Person', email: 'q@example.com' })).body
-  await t.a('POST', `/api/candidates/${c.id}/stage`, { stage: 'checked_in' }); await t.a('POST', `/api/candidates/${c.id}/stage`, { stage: 'waiting' })
+  await t.a('POST', `/api/candidates/${c.id}/stage`, { stage: 'checked_in' }) // auto-queues
   const one = await t.a('POST', '/api/actions/prepare', { type: 'interview_reminders' })
   assert.equal(one.body.created, 1)
   assert.equal((await t.a('POST', '/api/actions/prepare', { type: 'interview_reminders' })).body.created, 0)
@@ -192,7 +193,7 @@ test('an email only counts as sent when Gmail returns a message id (viaSocket an
     // a failed one can be retried and now succeeds
     const again = await t.a('POST', `/api/approvals/${bad.body.id}/retry`)
     assert.equal(again.body.status, 'executed')
-  } finally { globalThis.fetch = realFetch }
+  } finally { globalThis.fetch = realFetch; await query('delete from viasocket_connections') }
 })
 
 test('deleting candidates removes them, their feedback and pending emails, and respects ownership', async () => {
@@ -208,4 +209,41 @@ test('deleting candidates removes them, their feedback and pending emails, and r
   assert.equal(bulk.body.deleted, 1)
   assert.equal((await metrics()).total, before - 2)
   assert.equal((await t.b('POST', '/api/candidates/delete', { ids: [(await t.a('GET', '/api/candidates')).body[0].id] })).body.deleted, 0)
+})
+
+
+test('check-in joins the queue and emails the queue number; both behaviours are switchable', async () => {
+  const mk = async (name) => (await t.a('POST', '/api/candidates', { drive_id: drive.id, full_name: name, email: `${name.replace(/\s/g, '').toLowerCase()}@example.com` })).body
+  const before = (await t.a('GET', '/api/settings')).body
+  assert.deepEqual([before.auto_queue_on_check_in, before.auto_send_queue_emails], [true, true]) // defaults
+  const [a, b] = [await mk('Queue Alpha'), await mk('Queue Beta')]
+  const nums = []
+  for (const c of [a, b]) nums.push((await t.a('POST', `/api/candidates/${c.id}/stage`, { stage: 'checked_in' })).body)
+  assert.deepEqual(nums.map((n) => n.stage), ['waiting', 'waiting'])
+  assert.equal(nums[1].queue_number, nums[0].queue_number + 1)
+  // The queue email was created for each, carries the real number and people ahead, and (auto-send on) was attempted at once.
+  const all = (await t.a('GET', '/api/approvals')).body
+  const mailB = all.find((x) => x.candidate_id === b.id && x.payload.subject.includes('queue number'))
+  assert.ok(mailB.title.includes(`#${nums[1].queue_number}`)); assert.match(mailB.payload.body, new RegExp(`#${nums[1].queue_number}`)); assert.match(mailB.payload.body, /ahead of you/)
+  for (let i = 0; i < 20 && ['pending', 'approved'].includes((await t.a('GET', '/api/approvals')).body.find((x) => x.id === mailB.id).status); i++) await new Promise((r) => setTimeout(r, 100))
+  const sent = (await t.a('GET', '/api/approvals')).body.find((x) => x.id === mailB.id)
+  assert.notEqual(sent.status, 'pending') // auto-sent: no Gmail in tests, so it must fail honestly
+  assert.match(sent.error, /Gmail is not connected/)
+
+  // Switch both off: check-in stays a plain check-in, and Add to queue then sends the email for approval.
+  await t.a('PUT', '/api/settings', { auto_queue_on_check_in: false, auto_send_queue_emails: false })
+  const c = await mk('Queue Gamma')
+  assert.equal((await t.a('POST', `/api/candidates/${c.id}/stage`, { stage: 'checked_in' })).body.stage, 'checked_in')
+  assert.equal((await t.a('GET', '/api/approvals')).body.some((x) => x.candidate_id === c.id && x.payload.subject.includes('queue number')), false)
+  const queued = (await t.a('POST', `/api/candidates/${c.id}/stage`, { stage: 'waiting' })).body
+  assert.ok(queued.queue_number > nums[1].queue_number)
+  const pendingMail = (await t.a('GET', '/api/approvals?status=pending')).body.find((x) => x.candidate_id === c.id && x.payload.subject.includes('queue number'))
+  assert.ok(pendingMail, 'waits for approval when auto-send is off')
+  // A candidate without an email is queued but nobody is emailed.
+  const noMail = (await t.a('POST', '/api/candidates', { drive_id: drive.id, full_name: 'No Email', phone: '9111111111' })).body
+  await t.a('POST', `/api/candidates/${noMail.id}/stage`, { stage: 'checked_in' }); await t.a('POST', `/api/candidates/${noMail.id}/stage`, { stage: 'waiting' })
+  assert.equal((await t.a('GET', '/api/approvals')).body.some((x) => x.candidate_id === noMail.id), false)
+  await t.a('PUT', '/api/settings', { auto_queue_on_check_in: true, auto_send_queue_emails: true })
+  assert.equal((await t.a('GET', '/api/settings')).body.auto_queue_on_check_in, true)
+  assert.equal((await t.b('GET', '/api/settings')).body.auto_queue_on_check_in, true) // other users unaffected
 })

@@ -8,6 +8,8 @@ import { dashboardMetrics, waitingList, pendingFeedbackList } from '../lib/metri
 import { approveAndExecute, requestApproval, retry } from '../lib/approvals.js'
 import { interviewReminder, feedbackReminder } from '../lib/emails.js'
 import { afterCandidateCreated } from './public.js'
+import { getSettings } from '../lib/settings.js'
+import { notifyQueued } from '../lib/queue.js'
 
 const uuid = z.string().uuid()
 const opt = (s) => s.optional().nullable().or(z.literal('').transform(() => null))
@@ -127,8 +129,11 @@ export function hrRoutes() {
 
   r.post('/candidates/:id/stage', async (req, res) => {
     const b = z.object({ stage: z.enum(STAGES), interviewer_id: uuid.optional() }).parse(req.body)
-    const out = await changeStage(owner(req), uuid.parse(req.params.id), b.stage, { interviewerId: b.interviewer_id })
-    out.error ? res.status(out.status).json({ error: out.error }) : res.json(out.candidate)
+    const out = await changeStage(owner(req), uuid.parse(req.params.id), b.stage, { interviewerId: b.interviewer_id, autoQueue: (await getSettings(owner(req))).auto_queue_on_check_in })
+    if (out.error) return res.status(out.status).json({ error: out.error })
+    // Entering the queue (automatically at check-in, or by Add to queue) tells the candidate their number.
+    if (out.candidate.stage === 'waiting' && ['registered', 'checked_in'].includes(out.prev)) await notifyQueued(owner(req), out.candidate)
+    res.json(out.candidate)
   })
 
   r.patch('/candidates/:id/interviewer', async (req, res) => {
@@ -223,10 +228,15 @@ export function hrRoutes() {
     `select e.*, c.full_name from ingest_events e left join candidates c on c.id = e.candidate_id where e.owner_id = $1 order by e.created_at desc limit 100`, [owner(req)])))
 
   // ---------- settings ----------
-  r.get('/settings', async (req, res) => res.json((await one('select auto_send_confirmations from settings where owner_id = $1', [owner(req)])) || { auto_send_confirmations: false }))
+  r.get('/settings', async (req, res) => res.json(await getSettings(owner(req))))
   r.put('/settings', async (req, res) => {
-    const b = z.object({ auto_send_confirmations: z.boolean() }).parse(req.body)
-    res.json(await one(`insert into settings (owner_id, auto_send_confirmations) values ($1,$2) on conflict (owner_id) do update set auto_send_confirmations = $2 returning auto_send_confirmations`, [owner(req), b.auto_send_confirmations]))
+    const b = z.object({ auto_send_confirmations: z.boolean().optional(), auto_queue_on_check_in: z.boolean().optional(), auto_send_queue_emails: z.boolean().optional() }).parse(req.body)
+    const cur = { ...(await getSettings(owner(req))), ...b }
+    await query(
+      `insert into settings (owner_id, auto_send_confirmations, auto_queue_on_check_in, auto_send_queue_emails) values ($1,$2,$3,$4)
+       on conflict (owner_id) do update set auto_send_confirmations = $2, auto_queue_on_check_in = $3, auto_send_queue_emails = $4`,
+      [owner(req), cur.auto_send_confirmations, cur.auto_queue_on_check_in, cur.auto_send_queue_emails])
+    res.json(cur)
   })
   return r
 }

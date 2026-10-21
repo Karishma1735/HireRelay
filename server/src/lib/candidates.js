@@ -73,7 +73,7 @@ const TRANSITIONS = {
 }
 export const STAGES = Object.keys(TRANSITIONS)
 
-export async function changeStage(ownerId, id, stage, { interviewerId } = {}) {
+export async function changeStage(ownerId, id, stage, { interviewerId, autoQueue = false } = {}) {
   const c = await one('select * from candidates where id = $1 and owner_id = $2', [id, ownerId])
   if (!c) return { error: 'Candidate not found', status: 404 }
   if (!(TRANSITIONS[c.stage] || []).includes(stage)) return { error: `Cannot move from ${c.stage} to ${stage}`, status: 409 }
@@ -81,10 +81,12 @@ export async function changeStage(ownerId, id, stage, { interviewerId } = {}) {
     const iv = await one('select id from interviewers where id = $1 and owner_id = $2', [interviewerId, ownerId])
     if (!iv) return { error: 'Interviewer not found', status: 404 }
   }
-  const sets = ['stage = $3', 'updated_at = now()']; const params = [id, ownerId, stage]
+  // Checking in can put the candidate straight into the queue (HR setting): same result as check-in followed by Add to queue.
+  const goQueue = stage === 'checked_in' && autoQueue
+  const sets = ['stage = $3', 'updated_at = now()']; const params = [id, ownerId, goQueue ? 'waiting' : stage]
   const add = (sql, v) => { params.push(v); sets.push(sql.replace('?', `$${params.length}`)) }
   if (stage === 'checked_in') { sets.push('checked_in_at = coalesce(checked_in_at, now())') }
-  if (stage === 'waiting') {
+  if (stage === 'waiting' || goQueue) {
     if (c.queue_number == null) add('queue_number = (select coalesce(max(queue_number),0)+1 from candidates where drive_id = ?)', c.drive_id)
     if (c.stage === 'in_interview') { sets.push('interview_started_at = null') }
   }
@@ -97,5 +99,5 @@ export async function changeStage(ownerId, id, stage, { interviewerId } = {}) {
   if (stage === 'no_show') sets.push('queue_number = null')
   if (stage === 'registered') sets.push('checked_in_at = null', 'queue_number = null')
   const row = await one(`update candidates set ${sets.join(', ')} where id = $1 and owner_id = $2 returning *`, params)
-  return { candidate: row }
+  return { candidate: row, prev: c.stage }
 }

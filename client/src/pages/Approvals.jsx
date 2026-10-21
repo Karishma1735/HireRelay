@@ -12,11 +12,17 @@ export default function Approvals() {
   const approvals = useQuery({ queryKey: ['approvals', tab], queryFn: () => get(tab === 'pending' ? '/approvals?status=pending' : '/approvals'), enabled: tab !== 'runs' && tab !== 'sync', refetchInterval: 8000 })
   const runs = useQuery({ queryKey: ['runs'], queryFn: () => get('/runs'), enabled: tab === 'runs', refetchInterval: 8000 })
   const sync = useQuery({ queryKey: ['ingest-events'], queryFn: () => get('/ingest-events'), enabled: tab === 'sync', refetchInterval: 8000 })
+  const [pending, setPending] = useState({}) // switches flip instantly; the server value takes over once saved
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => get('/settings') })
   const act = useMutation({ mutationFn: ({ id, what }) => post(`/approvals/${id}/${what}`), onSuccess: refresh, onError: (e) => setError(e.message) })
   const all = useMutation({ mutationFn: () => post('/approvals/approve-all'), onSuccess: refresh, onError: (e) => setError(e.message) })
   const prep = useMutation({ mutationFn: (type) => post('/actions/prepare', { type }), onSuccess: (r) => { setError(''); refresh(); if (!r.created) setError('Nothing new to prepare: no matching candidates, or reminders are already pending.') }, onError: (e) => setError(e.message) })
-  const auto = useMutation({ mutationFn: (v) => put('/settings', { auto_send_confirmations: v }), onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] }) })
+  const auto = useMutation({
+    mutationFn: (patch) => put('/settings', patch),
+    onError: (e) => setError(e.message),
+    // Re-read the real values, then drop the local overrides.
+    onSettled: () => qc.invalidateQueries({ queryKey: ['settings'] }).then(() => setPending({}))
+  })
   const tabs = [['pending', 'Awaiting approval'], ['all', 'All approvals'], ['runs', 'Workflow executions'], ['sync', 'Form sync log']]
   return (
     <div className="space-y-4">
@@ -25,8 +31,12 @@ export default function Approvals() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap gap-2"><Button size="sm" variant="secondary" loading={prep.isPending && prep.variables === 'interview_reminders'} onClick={() => prep.mutate('interview_reminders')}>Prepare interview reminders</Button>
             <Button size="sm" variant="secondary" loading={prep.isPending && prep.variables === 'feedback_reminders'} onClick={() => prep.mutate('feedback_reminders')}>Prepare feedback reminders</Button></div>
-          <label className="flex items-center gap-2 text-sm text-slate-600" title="When on, registration confirmations are sent without waiting for approval. Reminders always need approval.">
-            <input type="checkbox" checked={!!settings.data?.auto_send_confirmations} onChange={(e) => auto.mutate(e.target.checked)} /> Auto-send registration confirmations</label>
+          <div className="flex flex-col gap-1.5 text-sm text-slate-600">
+            {[['auto_queue_on_check_in', 'Add to queue automatically on check-in', 'Checking someone in puts them straight into the queue and gives them a queue number.'],
+              ['auto_send_queue_emails', 'Auto-send the queue-number email', 'The candidate is emailed their queue number the moment they join the queue, without waiting for approval.'],
+              ['auto_send_confirmations', 'Auto-send registration confirmations', 'Registration confirmations are sent without waiting for approval. Reminders always need approval.']].map(([k, label, hint]) => (
+              <label key={k} className="flex items-center gap-2" title={hint}><input type="checkbox" checked={!!(pending[k] ?? settings.data?.[k])} disabled={!settings.data} onChange={(e) => { setPending((p) => ({ ...p, [k]: e.target.checked })); auto.mutate({ [k]: e.target.checked }) }} /> {label}</label>))}
+          </div>
         </div>
       </Card>
       {error && <Alert tone="warn">{error}</Alert>}

@@ -36,3 +36,17 @@ export function feedbackReminder(interviewer, items) {
       'Thank you,<br>The hiring team'])
   }
 }
+
+export function queueNumber(c, drive, ahead) {
+  return {
+    // The approvals table's purpose list is fixed at creation; queue notices use 'custom'.
+    purpose: 'custom', to: c.email,
+    subject: `You're checked in: queue number ${c.queue_number}`,
+    body: wrap([
+      `Hi ${esc(c.full_name)},`,
+      `You're checked in for <b>${esc(drive.name)}</b>. Your queue number is <b style="font-size:1.4em">#${c.queue_number}</b>.`,
+      ahead > 0 ? `There ${ahead === 1 ? 'is' : 'are'} ${ahead} ${ahead === 1 ? 'person' : 'people'} ahead of you right now.` : 'You are first in line.',
+      `Please stay near ${esc(drive.venue || 'the interview area')} and keep this number handy. We'll call you when it's your turn.`,
+      'Regards,<br>The hiring team'])
+  }
+}

@@ -150,6 +150,8 @@ create index if not exists ingest_events_owner_idx on ingest_events(owner_id, cr
 
 create table if not exists settings (
   owner_id text primary key references users(id) on delete cascade,
-  auto_send_confirmations integer not null default 0
+  auto_send_confirmations integer not null default 0,
+  auto_queue_on_check_in integer not null default 1,
+  auto_send_queue_emails integer not null default 1
 );
 

@@ -13,7 +13,7 @@ const schema = expand(fs.readFileSync(path.resolve(path.dirname(fileURLToPath(im
 
 // Columns stored as JSON text / 0-1 integers, converted back on the way out.
 const JSON_COLS = new Set(['field_map', 'extra', 'payload', 'request', 'response', 'config', 'input_data', 'drive'])
-const BOOL_COLS = new Set(['active', 'auto_send_confirmations', 'has_feedback', 'live', 'enabled', 'google_form_connected'])
+const BOOL_COLS = new Set(['active', 'auto_send_confirmations', 'auto_queue_on_check_in', 'auto_send_queue_emails', 'has_feedback', 'live', 'enabled', 'google_form_connected'])
 
 let db
 export function getDb() {
@@ -24,6 +24,11 @@ export function getDb() {
   db.exec('pragma foreign_keys = ON')
   if (file !== ':memory:') db.exec('pragma journal_mode = WAL') // Embarko replicates SQLite files under DATA_DIR, which needs WAL
   db.exec(schema)
+  // Columns added after first release: `create table if not exists` does not alter an existing table.
+  const cols = new Set(db.prepare('pragma table_info(settings)').all().map((c) => c.name))
+  for (const [name, def] of [['auto_queue_on_check_in', 1], ['auto_send_queue_emails', 1]]) {
+    if (!cols.has(name)) db.exec(`alter table settings add column ${name} integer not null default ${def}`)
+  }
   return db
 }
 export function closeDb() { if (db) { db.close(); db = undefined; cache.clear() } }

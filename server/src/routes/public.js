@@ -7,16 +7,17 @@ import { verifyIngestKey } from '../lib/ingestKey.js'
 import { upsertFromSubmission, logIngest } from '../lib/candidates.js'
 import { registrationConfirmation } from '../lib/emails.js'
 import { requestApproval, approveAndExecute } from '../lib/approvals.js'
+import { getSettings } from '../lib/settings.js'
 
 /** After a brand-new candidate: queue the confirmation email (or send it when HR enabled auto-send). */
 export async function afterCandidateCreated(drive, candidate) {
   if (!candidate.email) return
-  const settings = await one('select auto_send_confirmations from settings where owner_id = $1', [drive.owner_id])
+  const settings = await getSettings(drive.owner_id)
   const approval = await requestApproval(drive.owner_id, {
     email: registrationConfirmation(candidate, drive), candidateId: candidate.id, requestedBy: 'system',
     title: `Registration confirmation to ${candidate.full_name}`
   })
-  if (settings?.auto_send_confirmations) approveAndExecute(drive.owner_id, approval.id).catch((e) => console.error('auto-send failed', e.message))
+  if (settings.auto_send_confirmations) approveAndExecute(drive.owner_id, approval.id).catch((e) => console.error('auto-send failed', e.message))
 }
 
 const registerSchema = z.object({
