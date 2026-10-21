@@ -125,6 +125,7 @@ export function hrRoutes() {
     for (const id of ids) {
       if (!(await one('select 1 from candidates where id = $1 and owner_id = $2', [id, ownerId]))) continue
       await query(`delete from approvals where owner_id = $1 and candidate_id = $2 and status = 'pending'`, [ownerId, id])
+      await query('delete from ingest_events where candidate_id = $1 and owner_id = $2', [id, ownerId])
       await query('delete from candidates where id = $1 and owner_id = $2', [id, ownerId]); deleted++
     }
     return deleted
@@ -166,17 +167,19 @@ export function hrRoutes() {
     } catch (e) { if (e.code === '23505') return res.status(409).json({ error: 'Feedback already recorded' }); throw e }
   })
 
+  // A sync event belongs on screen only while its candidate exists; rejected/error events never had one.
+  const LIVE_EVENTS = `(e.candidate_id is not null or e.outcome in ('rejected','error'))`
+
   // ---------- dashboard ----------
   r.get('/dashboard', async (req, res) => {
     const driveId = req.query.drive_id ? uuid.parse(req.query.drive_id) : null
     if (driveId && !(await one('select 1 from drives where id = $1 and owner_id = $2', [driveId, owner(req)]))) return res.status(404).json({ error: 'Drive not found' })
-    const [metrics, waiting, pending, recentSync, recentRuns] = await Promise.all([
+    const [metrics, waiting, pending, recentSync] = await Promise.all([
       dashboardMetrics(owner(req), driveId), waitingList(owner(req), driveId, 20), pendingFeedbackList(owner(req), driveId, 20),
       many(`select e.id, e.source, e.outcome, e.message, e.created_at, c.full_name from ingest_events e left join candidates c on c.id = e.candidate_id
-            where e.owner_id = $1 and ($2 is null or e.drive_id = $2) order by e.created_at desc limit 8`, [owner(req), driveId]),
-      many(`select id, kind, status, error, started_at, finished_at from workflow_runs where owner_id = $1 order by started_at desc limit 8`, [owner(req)])
+            where e.owner_id = $1 and ($2 is null or e.drive_id = $2) and ${LIVE_EVENTS} order by e.created_at desc limit 8`, [owner(req), driveId])
     ])
-    res.json({ metrics, waiting, pending_feedback: pending, recent_sync: recentSync, recent_runs: recentRuns })
+    res.json({ metrics, waiting, pending_feedback: pending, recent_sync: recentSync })
   })
 
   // ---------- approvals & runs ----------
@@ -236,7 +239,7 @@ export function hrRoutes() {
   r.get('/runs', async (req, res) => res.json(await many(
     `select w.*, a.title from workflow_runs w left join approvals a on a.id = w.approval_id where w.owner_id = $1 order by w.started_at desc limit 100`, [owner(req)])))
   r.get('/ingest-events', async (req, res) => res.json(await many(
-    `select e.*, c.full_name from ingest_events e left join candidates c on c.id = e.candidate_id where e.owner_id = $1 order by e.created_at desc limit 100`, [owner(req)])))
+    `select e.*, c.full_name from ingest_events e left join candidates c on c.id = e.candidate_id where e.owner_id = $1 and ${LIVE_EVENTS} order by e.created_at desc limit 100`, [owner(req)])))
 
   // ---------- settings ----------
   r.get('/settings', async (req, res) => res.json(await getSettings(owner(req))))

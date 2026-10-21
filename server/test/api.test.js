@@ -269,3 +269,23 @@ test('interviewers report live counts and filter their own candidates', async ()
   assert.equal((await t.b('GET', `/api/interviewers/${iv.id}`)).status, 404) // another HR user cannot see it
   assert.equal((await t.b('GET', `/api/candidates?interviewer_id=${iv.id}`)).body.length, 0)
 })
+
+test('dashboard sync list drops deleted candidates and no longer carries workflow runs', async () => {
+  const { query } = await import('../src/db.js')
+  const created = (await t.anon('POST', `/api/public/drives/${drive.slug}/register`, { full_name: 'Soon Deleted', email: 'soondeleted@example.com' }))
+  assert.equal(created.status, 201)
+  const names = async () => (await t.a('GET', '/api/dashboard')).body.recent_sync.map((e) => e.full_name)
+  assert.ok((await names()).includes('Soon Deleted'))
+  const c = (await t.a('GET', '/api/candidates?q=soondeleted')).body[0]
+  assert.equal((await t.a('DELETE', `/api/candidates/${c.id}`)).status, 200)
+  assert.ok(!(await names()).includes('Soon Deleted'))
+  assert.equal(await query('select 1 from ingest_events where candidate_id = $1', [c.id]).then((r) => r.rows.length), 0) // log entry removed too
+  // Entries orphaned by earlier deletions (created, but no candidate) stay hidden; rejected submissions still show.
+  await query(`insert into ingest_events (owner_id, drive_id, source, outcome, message) values ($1,$2,'form','created','ghost')`, [t.users.a.id, drive.id])
+  await t.anon('POST', `/api/public/drives/${drive.slug}/register`, { full_name: 'No Contact Details' })      // rejected: needs email or phone
+  const feed = (await t.a('GET', '/api/dashboard')).body.recent_sync
+  assert.ok(feed.every((e) => e.full_name || e.outcome === 'rejected'), 'no nameless rows except rejected ones')
+  assert.ok(!feed.some((e) => e.message === 'ghost'))
+  assert.equal((await t.a('GET', '/api/ingest-events')).body.some((e) => e.message === 'ghost'), false) // same rule in the Form sync log tab
+  assert.equal('recent_runs' in (await t.a('GET', '/api/dashboard')).body, false)
+})

@@ -50,20 +50,12 @@ export default function Dashboard() {
                 <li key={c.id} className="flex items-center justify-between py-2"><span>{c.full_name}</span><span className="text-xs text-slate-500">{c.interviewer || 'unassigned'} · {ago(c.interview_completed_at)}</span></li>))}</ul>)}
           </Card>
         </div>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card title="Form synchronisation">
-            {dash.data.recent_sync.length === 0 ? <Empty>No submissions received yet.</Empty> : (
-              <ul className="divide-y divide-slate-100 text-sm">{dash.data.recent_sync.map((e) => (
-                <li key={e.id} className="flex items-center justify-between gap-2 py-2"><span className="truncate">{e.full_name || e.message || '—'} <span className="text-xs text-slate-400">via {e.source}</span></span>
-                  <span className="flex items-center gap-2"><Badge tone={e.outcome === 'created' ? 'green' : e.outcome === 'duplicate' ? 'amber' : 'red'}>{e.outcome}</Badge><span className="text-xs text-slate-400">{ago(e.created_at)}</span></span></li>))}</ul>)}
-          </Card>
-          <Card title="Workflow executions" action={<Link to="/approvals" className="text-xs text-indigo-600">{m.pending_approvals} awaiting approval</Link>}>
-            {dash.data.recent_runs.length === 0 ? <Empty>Nothing has run yet. Approved actions run through viaSocket.</Empty> : (
-              <ul className="divide-y divide-slate-100 text-sm">{dash.data.recent_runs.map((r) => (
-                <li key={r.id} className="flex items-center justify-between gap-2 py-2"><span className="truncate">{r.kind}{r.error && <span className="block truncate text-xs text-rose-600">{r.error}</span>}</span>
-                  <span className="flex items-center gap-2"><Badge tone={r.status === 'success' ? 'green' : r.status === 'failed' ? 'red' : 'amber'}>{r.status}</Badge><span className="text-xs text-slate-400">{ago(r.started_at)}</span></span></li>))}</ul>)}
-          </Card>
-        </div>
+        <Card title="Form synchronisation">
+          {dash.data.recent_sync.length === 0 ? <Empty>No submissions received yet.</Empty> : (
+            <ul className="divide-y divide-slate-100 text-sm">{dash.data.recent_sync.map((e) => (
+              <li key={e.id} className="flex items-center justify-between gap-2 py-2"><span className="truncate">{e.full_name || e.message || 'Submission'} <span className="text-xs text-slate-400">via {e.source}</span></span>
+                <span className="flex items-center gap-2"><Badge tone={e.outcome === 'created' ? 'green' : e.outcome === 'duplicate' ? 'amber' : 'red'}>{e.outcome}</Badge><span className="text-xs text-slate-400">{ago(e.created_at)}</span></span></li>))}</ul>)}
+        </Card>
       </>)}
     </div>
   )
