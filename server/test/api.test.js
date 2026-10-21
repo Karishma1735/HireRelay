@@ -327,3 +327,48 @@ test('importing the latest Google Form response adds it once, with the same mapp
     assert.equal((await t.a('POST', `/api/viasocket/drives/${drive.id}/google-form/import-latest`)).status, 502) // nothing to import: says so
   } finally { globalThis.fetch = realFetch; await query('delete from viasocket_subscriptions') }
 })
+
+test('form poller adds genuinely new responses once, and ignores stand-ins and older responses', async () => {
+  const { query } = await import('../src/db.js')
+  const { pollOnce } = await import('../src/lib/formPoller.js')
+  await query(`insert into viasocket_subscriptions (owner_id, drive_id, service_id, trigger_version_id, script_id, auth_id, input_data, handler) values ($1,$2,'rowshu8t54lr','row5hkzp1usn','scriPOLL','auth_rowshu8t54lr',$3,'x')`, [t.users.a.id, drive.id, { id: 'form1' }])
+  const realFetch = globalThis.fetch; let reply
+  globalThis.fetch = async (url, init) => String(url).includes('/func/scrijZpnr8zJ') ? new Response(JSON.stringify(reply), { status: 200 }) : realFetch(url, init)
+  const count = async () => (await t.a('GET', '/api/candidates?q=poller')).body.length
+  const now = new Date().toISOString()
+  try {
+    reply = { responseId: 'sampleId', createTime: now, Domain_to_be_enabled: 'example.org', viasocket_help: 'stand-in' }
+    assert.equal(await pollOnce(), 0)                                                    // placeholder sample: ignored
+    reply = { responseId: 'old-1', createTime: '2020-01-01T00:00:00Z', Full_Name: 'Poller Old', Email: 'poller.old@example.com' }
+    assert.equal(await pollOnce(), 0)                                                    // submitted before syncing started: left for manual import
+    reply = { responseId: 'new-1', createTime: now, Full_Name: 'Poller New', Email: 'poller.new@example.com', Phone_No_: '9000011111' }
+    assert.equal(await pollOnce(), 1); assert.equal(await count(), 1)                    // appears without any click
+    assert.equal(await pollOnce(), 0); assert.equal(await count(), 1)                    // same response next tick: nothing
+    reply = { responseId: 'new-2', createTime: now, Full_Name: 'Poller Same Person', Email: 'POLLER.NEW@example.com' }
+    assert.equal(await pollOnce(), 0); assert.equal(await count(), 1)                    // same email again: duplicate, not a second candidate
+    const mail = (await t.a('GET', '/api/approvals?status=pending')).body.filter((a) => a.payload.to === 'poller.new@example.com')
+    assert.equal(mail.length, 1)                                                          // one confirmation, not two
+    // The manual import refuses a placeholder too.
+    reply = { responseId: 'sampleId', createTime: now, Domain_to_be_enabled: 'example.org' }
+    assert.equal((await t.a('POST', `/api/viasocket/drives/${drive.id}/google-form/import-latest`)).status, 404)
+  } finally { globalThis.fetch = realFetch; await query('delete from viasocket_subscriptions') }
+})
+
+test('run history for the Google Form trigger is fetched with a per-user history token', async () => {
+  const { query } = await import('../src/db.js')
+  process.env.VIASOCKET_EMBED_SECRET = 'unit-test-secret'
+  await query(`insert into viasocket_subscriptions (owner_id, drive_id, service_id, trigger_version_id, script_id, auth_id, input_data, handler) values ($1,$2,'rowshu8t54lr','row5hkzp1usn','scriRUNS','auth_rowshu8t54lr',$3,'x')`, [t.users.a.id, drive.id, { id: 'form1' }])
+  const realFetch = globalThis.fetch; const seen = []
+  globalThis.fetch = async (url, init) => {
+    const u = String(url)
+    if (u.includes('/users/register')) { seen.push('register'); return new Response(JSON.stringify({ success: true, data: { token: 'proxy-1' } }), { status: 201 }) }
+    if (u.includes('/logs/orgId/80251')) { seen.push(`logs:${init.headers.proxy_auth_token}:${u.includes('scriptId=scriRUNS')}`); return new Response(JSON.stringify({ success: true, data: { finalResponse: [{ status: 'failed', createdAt: 'now', console: [{ message: 'HireRelay rejected the submission: 401' }], output: '' }] } }), { status: 200 }) }
+    return realFetch(url, init)
+  }
+  try {
+    const runs = await t.a('GET', `/api/viasocket/drives/${drive.id}/google-form/runs`)
+    assert.equal(runs.status, 200); assert.equal(runs.body[0].status, 'failed'); assert.match(runs.body[0].message, /rejected the submission: 401/)
+    assert.deepEqual(seen, ['register', 'logs:proxy-1:true'])
+    assert.equal((await t.b('GET', `/api/viasocket/drives/${drive.id}/google-form/runs`)).status, 404)
+  } finally { globalThis.fetch = realFetch; delete process.env.VIASOCKET_EMBED_SECRET; await query('delete from viasocket_subscriptions') }
+})

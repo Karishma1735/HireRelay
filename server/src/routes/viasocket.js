@@ -7,6 +7,7 @@ import { ingestKeyFor } from '../lib/ingestKey.js'
 import { mapSubmission } from '../lib/mapper.js'
 import { upsertFromSubmission, logIngest } from '../lib/candidates.js'
 import { afterCandidateCreated } from './public.js'
+import { isRealResponse } from '../lib/formPoller.js'
 
 const { forms, gmail } = config.viasocket
 const APPS = {
@@ -143,6 +144,15 @@ export function viasocketRoutes() {
     res.json({ event: body, note: viasocket_help ?? null, mapped: mapSubmission(body, drive.field_map).columns })
   })
 
+  /** What viaSocket recorded for this form's trigger: did it fire, and did the handler succeed or fail. */
+  r.get('/drives/:driveId/google-form/runs', async (req, res) => {
+    const drive = await driveOf(req)
+    const sub = await one(`select * from viasocket_subscriptions where drive_id = $1 and status = 'active'`, [drive.id])
+    if (!sub) return res.status(404).json({ error: 'No Google Form connected' })
+    const runs = await vs.flowRuns(uid(req), sub.script_id, 10)
+    res.json(runs.map((x) => ({ status: x.status, at: x.createdAt, message: String(Array.isArray(x.console) ? x.console.map((c) => c.message ?? c).join(' ') : x.console ?? '').slice(0, 300), output: String(x.output ?? '').slice(0, 300) })))
+  })
+
   /**
    * Adds the form's latest response as a candidate. Live delivery only covers responses submitted after syncing
    * started, so this is how an earlier response gets in. Same mapping, de-duplication and logging as live delivery.
@@ -152,6 +162,7 @@ export function viasocketRoutes() {
     const sub = await one(`select * from viasocket_subscriptions where drive_id = $1 and status = 'active'`, [drive.id])
     if (!sub) return res.status(404).json({ error: 'No Google Form connected' })
     const { viasocket_help, ...event } = (await vs.sampleTriggerEvent(forms.triggerId, sub.auth_id, forms.authType, sub.input_data)) || {}
+    if (Object.keys(event).length && !isRealResponse(event) && !event.response) return res.status(404).json({ error: 'This form has no responses yet (viaSocket only returned a placeholder). Submit a response, then try again.' })
     if (!Object.keys(event).length || event.response?.status >= 400) return res.status(502).json({ error: event.response?.data?.message || 'viaSocket returned no response for this form. Submit a response to the form first.' })
     const result = await upsertFromSubmission({ drive, raw: event, source: 'google_forms' })
     await logIngest(drive.owner_id, drive.id, 'google_forms', result, event)

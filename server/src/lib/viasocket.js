@@ -97,7 +97,7 @@ export async function subscribeEvent(uid, triggerVersionId, authId, inputData, c
 /** One real event for a connection: exactly what a handler reads at context.req.body. */
 export async function sampleTriggerEvent(triggerId, authId, authType, inputData) {
   const url = `${config.viasocket.runUrl}/func/scrijZpnr8zJ?action_id=${encodeURIComponent(triggerId)}&auth_id=${encodeURIComponent(authId)}&authType=${encodeURIComponent(authType)}`
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ context: { inputData } }) })
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ context: { inputData } }), signal: AbortSignal.timeout(20000) })
   return res.json().catch(() => ({}))
 }
 
@@ -119,4 +119,15 @@ export function formsHandler({ ingestUrl, driveId, ingestKey }) {
   if (response.status >= 400) throw new Error('HireRelay rejected the submission: ' + response.status + ' ' + JSON.stringify(response.data))
   return response.data
 `
+}
+
+/** The run history viaSocket keeps (30 days) for one flow, e.g. a Google Forms subscription: did it fire, did the handler fail. */
+export async function flowRuns(uid, scriptId, limit = 10) {
+  const reg = await call('/users/register', uid, { method: 'GET' })
+  const token = reg?.token
+  if (!token) throw new ViaSocketError('viaSocket did not issue a history token', { status: 502 })
+  const res = await fetch(`${config.viasocket.apiUrl}/logs/orgId/${config.viasocket.orgId}?projectId=${config.viasocket.projectId}&scriptId=${encodeURIComponent(scriptId)}&page=1&limit=${limit}`, { headers: { proxy_auth_token: token } })
+  const payload = await res.json().catch(() => ({}))
+  if (!res.ok || payload.success === false) throw new ViaSocketError(payload.message || `run history failed (${res.status})`, { detail: payload })
+  return payload.data?.finalResponse || []
 }

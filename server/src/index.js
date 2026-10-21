@@ -23,6 +23,9 @@ const dist = path.join(root, 'client/dist')
 const app = createApp({ staticDir: fs.existsSync(dist) ? dist : undefined })
 const server = app.listen(config.port, '0.0.0.0', () => console.log(`HireRelay on 0.0.0.0:${config.port}`))
 
+const { startFormPoller } = await import('./lib/formPoller.js')
+if (startFormPoller()) console.log(`checking Google Forms for new responses every ${process.env.FORM_POLL_SECONDS ?? 30}s`)
+
 // Release the database (and its lock) on a normal stop.
 const { closeDb } = await import('./db.js')
 for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { server.close(); try { closeDb() } catch { /* already closed */ } process.exit(0) })
