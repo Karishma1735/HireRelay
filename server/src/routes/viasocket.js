@@ -144,15 +144,6 @@ export function viasocketRoutes() {
     res.json({ event: body, note: viasocket_help ?? null, mapped: mapSubmission(body, drive.field_map).columns })
   })
 
-  /** What viaSocket recorded for this form's trigger: did it fire, and did the handler succeed or fail. */
-  r.get('/drives/:driveId/google-form/runs', async (req, res) => {
-    const drive = await driveOf(req)
-    const sub = await one(`select * from viasocket_subscriptions where drive_id = $1 and status = 'active'`, [drive.id])
-    if (!sub) return res.status(404).json({ error: 'No Google Form connected' })
-    const runs = await vs.flowRuns(uid(req), sub.script_id, 10)
-    res.json(runs.map((x) => ({ status: x.status, at: x.createdAt, message: String(Array.isArray(x.console) ? x.console.map((c) => c.message ?? c).join(' ') : x.console ?? '').slice(0, 300), output: String(x.output ?? '').slice(0, 300) })))
-  })
-
   /**
    * Adds the form's latest response as a candidate. Live delivery only covers responses submitted after syncing
    * started, so this is how an earlier response gets in. Same mapping, de-duplication and logging as live delivery.

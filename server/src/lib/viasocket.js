@@ -120,14 +120,3 @@ export function formsHandler({ ingestUrl, driveId, ingestKey }) {
   return response.data
 `
 }
-
-/** The run history viaSocket keeps (30 days) for one flow, e.g. a Google Forms subscription: did it fire, did the handler fail. */
-export async function flowRuns(uid, scriptId, limit = 10) {
-  const reg = await call('/users/register', uid, { method: 'GET' })
-  const token = reg?.token
-  if (!token) throw new ViaSocketError('viaSocket did not issue a history token', { status: 502 })
-  const res = await fetch(`${config.viasocket.apiUrl}/logs/orgId/${config.viasocket.orgId}?projectId=${config.viasocket.projectId}&scriptId=${encodeURIComponent(scriptId)}&page=1&limit=${limit}`, { headers: { proxy_auth_token: token } })
-  const payload = await res.json().catch(() => ({}))
-  if (!res.ok || payload.success === false) throw new ViaSocketError(payload.message || `run history failed (${res.status})`, { detail: payload })
-  return payload.data?.finalResponse || []
-}

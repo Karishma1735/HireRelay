@@ -353,22 +353,3 @@ test('form poller adds genuinely new responses once, and ignores stand-ins and o
     assert.equal((await t.a('POST', `/api/viasocket/drives/${drive.id}/google-form/import-latest`)).status, 404)
   } finally { globalThis.fetch = realFetch; await query('delete from viasocket_subscriptions') }
 })
-
-test('run history for the Google Form trigger is fetched with a per-user history token', async () => {
-  const { query } = await import('../src/db.js')
-  process.env.VIASOCKET_EMBED_SECRET = 'unit-test-secret'
-  await query(`insert into viasocket_subscriptions (owner_id, drive_id, service_id, trigger_version_id, script_id, auth_id, input_data, handler) values ($1,$2,'rowshu8t54lr','row5hkzp1usn','scriRUNS','auth_rowshu8t54lr',$3,'x')`, [t.users.a.id, drive.id, { id: 'form1' }])
-  const realFetch = globalThis.fetch; const seen = []
-  globalThis.fetch = async (url, init) => {
-    const u = String(url)
-    if (u.includes('/users/register')) { seen.push('register'); return new Response(JSON.stringify({ success: true, data: { token: 'proxy-1' } }), { status: 201 }) }
-    if (u.includes('/logs/orgId/80251')) { seen.push(`logs:${init.headers.proxy_auth_token}:${u.includes('scriptId=scriRUNS')}`); return new Response(JSON.stringify({ success: true, data: { finalResponse: [{ status: 'failed', createdAt: 'now', console: [{ message: 'HireRelay rejected the submission: 401' }], output: '' }] } }), { status: 200 }) }
-    return realFetch(url, init)
-  }
-  try {
-    const runs = await t.a('GET', `/api/viasocket/drives/${drive.id}/google-form/runs`)
-    assert.equal(runs.status, 200); assert.equal(runs.body[0].status, 'failed'); assert.match(runs.body[0].message, /rejected the submission: 401/)
-    assert.deepEqual(seen, ['register', 'logs:proxy-1:true'])
-    assert.equal((await t.b('GET', `/api/viasocket/drives/${drive.id}/google-form/runs`)).status, 404)
-  } finally { globalThis.fetch = realFetch; delete process.env.VIASOCKET_EMBED_SECRET; await query('delete from viasocket_subscriptions') }
-})

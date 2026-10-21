@@ -52,7 +52,6 @@ function GoogleFormCard({ drive }) {
     onSuccess: (r) => { setError(''); setImported(r); qc.invalidateQueries({ queryKey: ['candidates'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); done() },
     onError: (e) => { setImported(null); setError(e.message) }
   })
-  const runs = useMutation({ mutationFn: () => get(`/viasocket/drives/${drive.id}/google-form/runs`), onError: (e) => setError(e.message) })
   const sample = useMutation({ mutationFn: () => get(`/viasocket/drives/${drive.id}/google-form/sample`), onError: (e) => setError(e.message) })
   return (
     <Card title="Google Form via viaSocket" action={sub ? <Badge tone="green">Live</Badge> : <Badge>Not connected</Badge>}>
@@ -65,9 +64,7 @@ function GoogleFormCard({ drive }) {
           <p className="text-slate-600">New responses appear here <b>automatically</b>. HireRelay checks your form every 30 seconds, and viaSocket also delivers them directly. Duplicates are ignored and interview status is never overwritten. Only a response sent <i>before</i> syncing started needs <b>Import latest response</b>.</p>
           <p className={`rounded-lg px-3 py-2 text-xs ${drive.last_form_event ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}>
             {drive.last_form_event ? <>Last response received {ago(drive.last_form_event.created_at)} ({drive.last_form_event.outcome === 'created' ? 'added as a new candidate' : drive.last_form_event.outcome}).</> : <>No response has arrived yet. Submit a response to your form, then check back here, or import the latest existing one.</>}</p>
-          <div className="flex flex-wrap gap-2"><Button size="sm" loading={importLatest.isPending} onClick={() => importLatest.mutate()}>Import latest response</Button><Button size="sm" variant="secondary" loading={sample.isPending} onClick={() => sample.mutate()}>Preview mapping</Button><Button size="sm" variant="secondary" loading={runs.isPending} onClick={() => runs.mutate()}>Delivery log</Button><Button size="sm" variant="danger" loading={disconnect.isPending} onClick={() => disconnect.mutate()}>Disconnect</Button></div>
-          {runs.data && (runs.data.length === 0 ? <p className="rounded-lg bg-slate-50 p-2.5 text-xs text-slate-600">viaSocket has not run this form's trigger yet. That is normal until a new response is submitted; HireRelay's own 30-second check still picks it up.</p> : (
-            <ul className="space-y-1 rounded-lg bg-slate-50 p-2.5 text-xs">{runs.data.map((r, i) => <li key={i} className="flex flex-wrap items-baseline gap-x-2"><Badge tone={r.status === 'success' ? 'green' : 'red'}>{r.status}</Badge><span className="text-slate-500">{ago(r.at)}</span>{r.message && <span className="break-all text-slate-700">{r.message}</span>}</li>)}</ul>))}
+          <div className="flex flex-wrap gap-2"><Button size="sm" loading={importLatest.isPending} onClick={() => importLatest.mutate()}>Import latest response</Button><Button size="sm" variant="secondary" loading={sample.isPending} onClick={() => sample.mutate()}>Preview mapping</Button><Button size="sm" variant="danger" loading={disconnect.isPending} onClick={() => disconnect.mutate()}>Disconnect</Button></div>
           {imported && <Alert tone="ok">{imported.outcome === 'created' ? <>Added <b>{imported.name}</b> to this drive.</> : <>That response is already in this drive{imported.name ? <> (<b>{imported.name}</b>)</> : ''}, so nothing was added.</>}</Alert>}
           {sample.data && <div className="rounded-lg bg-slate-50 p-3 text-xs"><div className="mb-1 font-medium">How the latest response would map (preview only, nothing is added):</div>
             <pre className="overflow-x-auto whitespace-pre-wrap">{JSON.stringify(sample.data.mapped, null, 2)}</pre>
