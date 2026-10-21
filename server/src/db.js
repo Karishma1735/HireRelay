@@ -22,6 +22,9 @@ export function getDb() {
   if (db) return db
   let file = ':memory:'
   if (!process.env.DB_MEMORY) { fs.mkdirSync(config.dataDir, { recursive: true }); file = path.join(config.dataDir, 'hirerelay.db') }
+  // node-sqlite3-wasm locks with a `<file>.lock` folder; a killed process leaves it behind and blocks every query.
+  // This app is the only writer, so a lock found at boot is always stale.
+  if (file !== ':memory:') fs.rmSync(`${file}.lock`, { recursive: true, force: true })
   db = new Database(file)
   db.exec('pragma foreign_keys = ON')
   db.exec(schema)
