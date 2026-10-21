@@ -307,3 +307,23 @@ test('dashboard carries real chart data: timeline, live interviews, interviewer 
   assert.equal(scoped.timeline.length, 14)
   assert.equal((await t.b('GET', '/api/dashboard')).body.timeline.every((x) => x.count === 0), true) // other user sees nothing of ours
 })
+
+test('importing the latest Google Form response adds it once, with the same mapping and de-duplication as live delivery', async () => {
+  const { query } = await import('../src/db.js')
+  await query(`insert into viasocket_subscriptions (owner_id, drive_id, service_id, trigger_version_id, script_id, auth_id, input_data, handler) values ($1,$2,'rowshu8t54lr','row5hkzp1usn','scriSUB','auth_rowshu8t54lr',$3,'x')`, [t.users.a.id, drive.id, { id: 'form1' }])
+  const realFetch = globalThis.fetch
+  const event = { responseId: 'resp-import-1', createTime: 'x', Full_Name: 'Karishma S', Email: 'karishma.import@example.com', Phone_No_: '9090909056', College: 'IIT' }
+  globalThis.fetch = async (url, init) => String(url).includes('/func/scrijZpnr8zJ') ? new Response(JSON.stringify({ ...event, viasocket_help: 'sample' }), { status: 200 }) : realFetch(url, init)
+  try {
+    const first = await t.a('POST', `/api/viasocket/drives/${drive.id}/google-form/import-latest`)
+    assert.deepEqual([first.status, first.body.outcome, first.body.name], [200, 'created', 'Karishma S'])
+    const c = (await t.a('GET', '/api/candidates?q=karishma.import')).body[0]
+    assert.deepEqual([c.phone, c.source, c.extra.College], ['9090909056', 'google_forms', 'IIT'])
+    assert.equal((await t.a('POST', `/api/viasocket/drives/${drive.id}/google-form/import-latest`)).body.outcome, 'duplicate') // same response again
+    assert.equal((await t.a('GET', '/api/candidates?q=karishma.import')).body.length, 1)
+    assert.equal((await t.a('GET', `/api/drives/${drive.id}`)).body.last_form_event.outcome, 'duplicate') // shows delivery status
+    assert.equal((await t.b('POST', `/api/viasocket/drives/${drive.id}/google-form/import-latest`)).status, 404) // not their drive
+    globalThis.fetch = async (url, init) => String(url).includes('/func/scrijZpnr8zJ') ? new Response(JSON.stringify({}), { status: 200 }) : realFetch(url, init)
+    assert.equal((await t.a('POST', `/api/viasocket/drives/${drive.id}/google-form/import-latest`)).status, 502) // nothing to import: says so
+  } finally { globalThis.fetch = realFetch; await query('delete from viasocket_subscriptions') }
+})

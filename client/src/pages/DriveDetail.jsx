@@ -5,6 +5,7 @@ import { Copy, Check, Plus } from 'lucide-react'
 import { get, post, patch, del } from '../lib/api.js'
 import CandidateTable from '../components/CandidateTable.jsx'
 import { Alert, Badge, Button, Card, Field, Modal, Spinner } from '../components/ui.jsx'
+import { ago } from '../lib/format.js'
 
 export default function DriveDetail() {
   const { id } = useParams(); const qc = useQueryClient()
@@ -45,6 +46,12 @@ function GoogleFormCard({ drive }) {
   const done = () => { qc.invalidateQueries({ queryKey: ['drive', drive.id] }); qc.invalidateQueries({ queryKey: ['drives'] }) }
   const connect = useMutation({ mutationFn: () => post(`/viasocket/drives/${drive.id}/google-form`, { form_id: formId }), onSuccess: () => { setError(''); done() }, onError: (e) => setError(e.message) })
   const disconnect = useMutation({ mutationFn: () => del(`/viasocket/drives/${drive.id}/google-form`), onSuccess: done, onError: (e) => setError(e.message) })
+  const [imported, setImported] = useState(null)
+  const importLatest = useMutation({
+    mutationFn: () => post(`/viasocket/drives/${drive.id}/google-form/import-latest`),
+    onSuccess: (r) => { setError(''); setImported(r); qc.invalidateQueries({ queryKey: ['candidates'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); done() },
+    onError: (e) => { setImported(null); setError(e.message) }
+  })
   const sample = useMutation({ mutationFn: () => get(`/viasocket/drives/${drive.id}/google-form/sample`), onError: (e) => setError(e.message) })
   return (
     <Card title="Google Form via viaSocket" action={sub ? <Badge tone="green">Live</Badge> : <Badge>Not connected</Badge>}>
@@ -54,9 +61,12 @@ function GoogleFormCard({ drive }) {
         <p className="text-sm text-slate-600">Connect your Google account on <Link className="font-medium text-indigo-600" to="/integrations">Integrations</Link> to sync a Google Form into this drive.</p>
       ) : sub ? (
         <div className="space-y-3 text-sm">
-          <p className="text-slate-600">New responses are delivered by a viaSocket handler to HireRelay, which de-duplicates them and never overwrites interview status.</p>
-          <div className="flex gap-2"><Button size="sm" variant="secondary" loading={sample.isPending} onClick={() => sample.mutate()}>Check latest response</Button><Button size="sm" variant="danger" loading={disconnect.isPending} onClick={() => disconnect.mutate()}>Disconnect</Button></div>
-          {sample.data && <div className="rounded-lg bg-slate-50 p-3 text-xs"><div className="mb-1 font-medium">How the latest real response maps:</div>
+          <p className="text-slate-600">Responses submitted <b>from now on</b> are delivered by viaSocket to HireRelay, which de-duplicates them and never overwrites interview status. Responses sent before syncing started are not delivered automatically: import the latest one below.</p>
+          <p className={`rounded-lg px-3 py-2 text-xs ${drive.last_form_event ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}>
+            {drive.last_form_event ? <>Last response received {ago(drive.last_form_event.created_at)} ({drive.last_form_event.outcome === 'created' ? 'added as a new candidate' : drive.last_form_event.outcome}).</> : <>No response has arrived yet. Submit a response to your form, then check back here, or import the latest existing one.</>}</p>
+          <div className="flex flex-wrap gap-2"><Button size="sm" loading={importLatest.isPending} onClick={() => importLatest.mutate()}>Import latest response</Button><Button size="sm" variant="secondary" loading={sample.isPending} onClick={() => sample.mutate()}>Preview mapping</Button><Button size="sm" variant="danger" loading={disconnect.isPending} onClick={() => disconnect.mutate()}>Disconnect</Button></div>
+          {imported && <Alert tone="ok">{imported.outcome === 'created' ? <>Added <b>{imported.name}</b> to this drive.</> : <>That response is already in this drive{imported.name ? <> (<b>{imported.name}</b>)</> : ''}, so nothing was added.</>}</Alert>}
+          {sample.data && <div className="rounded-lg bg-slate-50 p-3 text-xs"><div className="mb-1 font-medium">How the latest response would map (preview only, nothing is added):</div>
             <pre className="overflow-x-auto whitespace-pre-wrap">{JSON.stringify(sample.data.mapped, null, 2)}</pre>
             <div className="mt-2 font-medium">Form keys received:</div><div className="text-slate-600">{Object.keys(sample.data.event).join(', ') || 'none'}</div>
             {sample.data.note && <div className="mt-1 text-amber-700">{sample.data.note}</div>}</div>}

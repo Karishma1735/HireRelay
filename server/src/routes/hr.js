@@ -40,7 +40,9 @@ export function hrRoutes() {
     const d = await one('select * from drives where id = $1 and owner_id = $2', [uuid.parse(req.params.id), owner(req)])
     if (!d) return res.status(404).json({ error: 'Drive not found' })
     const sub = await one(`select id, script_id is not null as live, input_data, created_at from viasocket_subscriptions where drive_id = $1 and status = 'active'`, [d.id])
-    res.json({ ...d, google_form_subscription: sub })
+    // So the drive page can say whether any response has really arrived through viaSocket yet.
+    const last = await one(`select created_at, outcome from ingest_events where drive_id = $1 and source = 'google_forms' order by created_at desc limit 1`, [d.id])
+    res.json({ ...d, google_form_subscription: sub, last_form_event: last })
   })
 
   r.patch('/drives/:id', async (req, res) => {
