@@ -289,3 +289,21 @@ test('dashboard sync list drops deleted candidates and no longer carries workflo
   assert.equal((await t.a('GET', '/api/ingest-events')).body.some((e) => e.message === 'ghost'), false) // same rule in the Form sync log tab
   assert.equal('recent_runs' in (await t.a('GET', '/api/dashboard')).body, false)
 })
+
+test('dashboard carries real chart data: timeline, live interviews, interviewer load, timings', async () => {
+  const d = (await t.a('GET', '/api/dashboard')).body
+  assert.equal(d.timeline.length, 14)
+  assert.equal(d.timeline.at(-1).day, new Date().toISOString().slice(0, 10))
+  const total = d.timeline.reduce((n, x) => n + x.count, 0)
+  assert.ok(total > 0 && total <= d.metrics.total, 'timeline counts only candidates that exist')
+  assert.deepEqual(Object.keys(d.setup).sort(), ['candidates', 'drives', 'interviewers'])
+  assert.ok(d.setup.drives >= 1 && d.setup.candidates === d.metrics.total)
+  for (const l of d.interviewer_load) assert.ok(l.done >= 0 && l.running >= 0 && l.not_started >= 0)
+  const busy = d.interviewer_load.find((l) => l.name === 'Counts Panelist')
+  assert.ok(busy && busy.done === 1 && busy.running === 1, JSON.stringify(busy)) // from the interviewer-count test
+  assert.ok(d.in_interview.some((c) => c.interviewer === 'Counts Panelist'))
+  assert.ok(d.metrics.avg_interview_min === null || d.metrics.avg_interview_min >= 0)
+  const scoped = (await t.a('GET', `/api/dashboard?drive_id=${drive.id}`)).body
+  assert.equal(scoped.timeline.length, 14)
+  assert.equal((await t.b('GET', '/api/dashboard')).body.timeline.every((x) => x.count === 0), true) // other user sees nothing of ours
+})

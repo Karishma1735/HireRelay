@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { one, many, query } from '../db.js'
 import { slugify } from '../lib/normalize.js'
 import { upsertFromSubmission, logIngest, changeStage, STAGES } from '../lib/candidates.js'
-import { dashboardMetrics, waitingList, pendingFeedbackList } from '../lib/metrics.js'
+import { dashboardMetrics, waitingList, pendingFeedbackList, registrationsTimeline, nowInterviewing, interviewerLoad } from '../lib/metrics.js'
 import { approveAndExecute, requestApproval, retry } from '../lib/approvals.js'
 import { interviewReminder, feedbackReminder } from '../lib/emails.js'
 import { afterCandidateCreated } from './public.js'
@@ -174,12 +174,15 @@ export function hrRoutes() {
   r.get('/dashboard', async (req, res) => {
     const driveId = req.query.drive_id ? uuid.parse(req.query.drive_id) : null
     if (driveId && !(await one('select 1 from drives where id = $1 and owner_id = $2', [driveId, owner(req)]))) return res.status(404).json({ error: 'Drive not found' })
-    const [metrics, waiting, pending, recentSync] = await Promise.all([
+    const [metrics, waiting, pending, recentSync, timeline, interviewing, load, counts] = await Promise.all([
       dashboardMetrics(owner(req), driveId), waitingList(owner(req), driveId, 20), pendingFeedbackList(owner(req), driveId, 20),
       many(`select e.id, e.source, e.outcome, e.message, e.created_at, c.full_name from ingest_events e left join candidates c on c.id = e.candidate_id
-            where e.owner_id = $1 and ($2 is null or e.drive_id = $2) and ${LIVE_EVENTS} order by e.created_at desc limit 8`, [owner(req), driveId])
+            where e.owner_id = $1 and ($2 is null or e.drive_id = $2) and ${LIVE_EVENTS} order by e.created_at desc limit 8`, [owner(req), driveId]),
+      registrationsTimeline(owner(req), driveId), nowInterviewing(owner(req), driveId), interviewerLoad(owner(req), driveId),
+      one(`select (select count(*) from drives where owner_id = $1) as drives, (select count(*) from interviewers where owner_id = $1) as interviewers,
+                  (select count(*) from candidates where owner_id = $1) as candidates`, [owner(req)])
     ])
-    res.json({ metrics, waiting, pending_feedback: pending, recent_sync: recentSync })
+    res.json({ metrics, waiting, pending_feedback: pending, recent_sync: recentSync, timeline, in_interview: interviewing, interviewer_load: load, setup: counts })
   })
 
   // ---------- approvals & runs ----------
