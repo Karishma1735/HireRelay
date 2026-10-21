@@ -1,0 +1,38 @@
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+const when = (d) => (d ? new Date(d).toISOString().slice(0, 10) : 'the scheduled date')
+const wrap = (lines) => lines.map((l) => `<p>${l}</p>`).join('')
+
+export function registrationConfirmation(c, drive) {
+  return {
+    purpose: 'registration_confirmation', to: c.email,
+    subject: `You're registered: ${drive.name}`,
+    body: wrap([
+      `Hi ${esc(c.full_name)},`,
+      `Thanks for registering for <b>${esc(drive.name)}</b>${drive.role_title ? ` (${esc(drive.role_title)})` : ''}.`,
+      `Please arrive at ${esc(drive.venue || 'the venue')} on ${esc(when(drive.drive_date))} and check in at the desk.`,
+      'Regards,<br>The hiring team'])
+  }
+}
+export function interviewReminder(c, drive) {
+  return {
+    purpose: 'interview_reminder', to: c.email,
+    subject: `Interview reminder: ${drive.name}`,
+    body: wrap([
+      `Hi ${esc(c.full_name)},`,
+      `A reminder about your interview at <b>${esc(drive.name)}</b>${c.queue_number ? ` — your queue number is <b>${c.queue_number}</b>` : ''}.`,
+      `Please be at ${esc(drive.venue || 'the venue')} and keep your queue number handy.`,
+      'Regards,<br>The hiring team'])
+  }
+}
+export function feedbackReminder(interviewer, items) {
+  return {
+    purpose: 'feedback_reminder', to: interviewer.email,
+    subject: `Pending interview feedback (${items.length})`,
+    body: wrap([
+      `Hi ${esc(interviewer.name)},`,
+      'Feedback is still pending for these completed interviews:',
+      `<ul>${items.map((i) => `<li>${esc(i.full_name)}${i.role_applied ? ` — ${esc(i.role_applied)}` : ''}</li>`).join('')}</ul>`,
+      'Please submit it in HireRelay today.',
+      'Thank you,<br>The hiring team'])
+  }
+}

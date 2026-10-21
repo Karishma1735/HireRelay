@@ -1,0 +1,14 @@
+# Local Supabase (run `npx supabase start`). Postgres is on 54322, the API on 54321.
+project_id = "hirerelay"
+
+[api]
+port = 54321
+
+[db]
+port = 54322
+major_version = 15
+
+[auth]
+enable_signup = true
+[auth.email]
+enable_confirmations = false

@@ -1,4 +1,7 @@
 .env
+.env.*
+!.env.example
 node_modules/
+dist/
 viasocket-skill.md
-viasocket-*.md
+.claude/skills/viasocket/apps/
