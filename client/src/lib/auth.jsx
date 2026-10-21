@@ -1,20 +1,22 @@
-import { createContext, useContext, useEffect, useState } from 'react'
-import { getSupabase } from './supabase.js'
+import { createContext, useCallback, useContext, useState } from 'react'
+
+const KEY = 'hirerelay-session'
+const read = () => { try { return JSON.parse(localStorage.getItem(KEY)) } catch { return null } }
+const write = (s) => { try { s ? localStorage.setItem(KEY, JSON.stringify(s)) : localStorage.removeItem(KEY) } catch { /* storage unavailable */ } }
+
+export const getToken = () => read()?.token
 
 const Ctx = createContext(null)
 export const useAuth = () => useContext(Ctx)
 
 export function AuthProvider({ children }) {
-  const [state, setState] = useState({ loading: true, session: null, supabase: null })
-  useEffect(() => {
-    let sub
-    getSupabase().then(async (supabase) => {
-      if (!supabase) return setState({ loading: false, session: null, supabase: null })
-      const { data } = await supabase.auth.getSession()
-      setState({ loading: false, session: data.session, supabase })
-      sub = supabase.auth.onAuthStateChange((_e, session) => setState((s) => ({ ...s, session }))).data.subscription
-    }).catch(() => setState({ loading: false, session: null, supabase: null }))
-    return () => sub?.unsubscribe()
+  const [session, setSession] = useState(read)
+  const authenticate = useCallback(async (mode, email, password) => {
+    const res = await fetch(`/api/auth/${mode}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) })
+    const j = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(j.details?.join('. ') || j.error || 'Could not sign in')
+    write(j); setSession(j)
   }, [])
-  return <Ctx.Provider value={state}>{children}</Ctx.Provider>
+  const signOut = useCallback(() => { write(null); setSession(null) }, [])
+  return <Ctx.Provider value={{ session, authenticate, signOut }}>{children}</Ctx.Provider>
 }

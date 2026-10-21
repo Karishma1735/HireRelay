@@ -1,32 +1,63 @@
-import pg from 'pg'
+import crypto from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import Database from 'better-sqlite3'
 import { config } from './config.js'
 
-pg.types.setTypeParser(1700, (v) => (v === null ? null : Number(v))) // numeric -> number
-pg.types.setTypeParser(1082, (v) => v) // date stays 'YYYY-MM-DD'
+// SQLite under DATA_DIR: the one file survives redeploys. DB_MEMORY=1 keeps it in memory (tests).
+const schema = fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../schema.sql'), 'utf8')
 
-let pool
-export function getPool() {
-  if (!pool) {
-    if (!config.databaseUrl) throw Object.assign(new Error('DATABASE_URL is not set'), { status: 503, code: 'database_not_configured' })
-    pool = new pg.Pool({ connectionString: config.databaseUrl, max: 10 })
-  }
-  return pool
+// Columns stored as JSON text / 0-1 integers, converted back on the way out.
+const JSON_COLS = new Set(['field_map', 'extra', 'payload', 'request', 'response', 'config', 'input_data', 'drive'])
+const BOOL_COLS = new Set(['active', 'auto_send_confirmations', 'has_feedback', 'live', 'enabled', 'google_form_connected'])
+
+let db
+export function getDb() {
+  if (db) return db
+  let file = ':memory:'
+  if (!process.env.DB_MEMORY) { fs.mkdirSync(config.dataDir, { recursive: true }); file = path.join(config.dataDir, 'hirerelay.db') }
+  db = new Database(file)
+  db.pragma('journal_mode = WAL'); db.pragma('foreign_keys = ON')
+  db.function('now', () => new Date().toISOString())
+  db.function('gen_uuid', () => crypto.randomUUID())
+  db.exec(schema)
+  return db
 }
-export async function closePool() { if (pool) { await pool.end(); pool = undefined } }
+export function closeDb() { if (db) { db.close(); db = undefined; cache.clear() } }
 
-export const query = (text, params) => getPool().query(text, params)
+const cache = new Map()
+/** `$1`-style numbered parameters (reusable) become positional `?`, with arguments in order of appearance. */
+function compile(text) {
+  let c = cache.get(text)
+  if (!c) {
+    const order = []
+    const sql = text.replace(/\$(\d+)/g, (_, n) => { order.push(Number(n) - 1); return '?' })
+    c = { stmt: getDb().prepare(sql), order }
+    cache.set(text, c)
+  }
+  return c
+}
+const toDb = (v) => (typeof v === 'boolean' ? Number(v) : v !== null && typeof v === 'object' ? JSON.stringify(v) : v)
+function fromDb(row) {
+  for (const k of Object.keys(row)) {
+    const v = row[k]
+    if (JSON_COLS.has(k) && typeof v === 'string') { try { row[k] = JSON.parse(v) } catch { /* leave as text */ } }
+    else if (BOOL_COLS.has(k) && v !== null) row[k] = Boolean(v)
+  }
+  return row
+}
+
+export async function query(text, params = []) {
+  const { stmt, order } = compile(text)
+  const args = order.map((i) => toDb(params[i]))
+  try {
+    if (stmt.reader) return { rows: stmt.all(...args).map(fromDb) }
+    stmt.run(...args); return { rows: [] }
+  } catch (e) {
+    if (String(e.code).startsWith('SQLITE_CONSTRAINT_UNIQUE') || e.code === 'SQLITE_CONSTRAINT_PRIMARYKEY') e.code = '23505' // keep the existing unique-violation handling
+    throw e
+  }
+}
 export const one = async (text, params) => (await query(text, params)).rows[0] || null
 export const many = async (text, params) => (await query(text, params)).rows
-
-export async function tx(fn) {
-  const client = await getPool().connect()
-  try {
-    await client.query('begin')
-    const out = await fn(client)
-    await client.query('commit')
-    return out
-  } catch (e) {
-    await client.query('rollback').catch(() => {})
-    throw e
-  } finally { client.release() }
-}

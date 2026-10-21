@@ -3,20 +3,22 @@ import express from 'express'
 import cors from 'cors'
 import { ZodError } from 'zod'
 import { config } from './config.js'
-import { requireAuth, supabaseVerifier } from './auth.js'
+import { requireAuth, localVerifier } from './auth.js'
+import { authRoutes } from './routes/auth.js'
 import { publicRoutes } from './routes/public.js'
 import { hrRoutes } from './routes/hr.js'
 import { viasocketRoutes } from './routes/viasocket.js'
 import { agentRoutes } from './routes/agent.js'
 
 /** `verifyToken` is injectable so tests can exercise the API without a running Supabase Auth. */
-export function createApp({ verifyToken = supabaseVerifier(), staticDir } = {}) {
+export function createApp({ verifyToken = localVerifier, staticDir } = {}) {
   const app = express()
   app.set('trust proxy', 1)
   app.use(cors({ origin: config.corsOrigins.length ? config.corsOrigins : true }))
   app.use(express.json({ limit: '1mb' }))
 
   app.use('/api', publicRoutes())
+  app.use('/api', authRoutes())
   const auth = requireAuth(verifyToken)
   app.use('/api', auth, hrRoutes())
   app.use('/api/viasocket', auth, viasocketRoutes())

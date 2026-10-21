@@ -35,9 +35,9 @@ export async function upsertFromSubmission({ drive, raw, source }) {
 async function findExisting(driveId, c, source, externalRef) {
   return one(
     `select * from candidates where drive_id = $1 and (
-       ($2::text is not null and email_norm = $2) or
-       ($3::text is not null and phone_norm = $3) or
-       ($4::text is not null and source = $5 and external_ref = $4)
+       ($2 is not null and email_norm = $2) or
+       ($3 is not null and phone_norm = $3) or
+       ($4 is not null and source = $5 and external_ref = $4)
      ) order by created_at limit 1`,
     [driveId, c.email_norm, c.phone_norm, externalRef, source]
   )
@@ -49,7 +49,7 @@ async function fillBlanks(existing, c, extra) {
        email = coalesce(email, $2), email_norm = coalesce(email_norm, $3),
        phone = coalesce(phone, $4), phone_norm = coalesce(phone_norm, $5),
        role_applied = coalesce(role_applied, $6), experience_years = coalesce(experience_years, $7),
-       current_company = coalesce(current_company, $8), extra = $9::jsonb || extra, updated_at = now()
+       current_company = coalesce(current_company, $8), extra = json_patch($9, extra), updated_at = now()
      where id = $1 returning *`,
     [existing.id, c.email, c.email_norm, c.phone, c.phone_norm, c.role_applied, c.experience_years, c.current_company, extra]
   ).catch(async (e) => { if (e.code === '23505') return existing; throw e })

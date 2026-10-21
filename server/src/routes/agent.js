@@ -29,7 +29,7 @@ export function agentRoutes() {
     const queued = []
     for (const p of validProposals(reply.proposed_actions, snapshot)) {
       if (p.type === 'interview_reminder') {
-        const c = await one(`select c.*, row_to_json(d) as drive from candidates c join drives d on d.id = c.drive_id where c.id = $1 and c.owner_id = $2 and c.email is not null`, [p.candidate_id, owner])
+        const c = await one(`select c.*, json_object('name', d.name, 'role_title', d.role_title, 'venue', d.venue, 'drive_date', d.drive_date) as drive from candidates c join drives d on d.id = c.drive_id where c.id = $1 and c.owner_id = $2 and c.email is not null`, [p.candidate_id, owner])
         if (!c) continue
         queued.push(await requestApproval(owner, { email: interviewReminder(c, c.drive), candidateId: c.id, requestedBy: 'agent', title: `Interview reminder to ${c.full_name}`, reason: p.reason }))
       } else {

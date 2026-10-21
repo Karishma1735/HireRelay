@@ -85,7 +85,7 @@ export function viasocketRoutes() {
     if (!conn) return res.status(409).json({ error: 'Connect Gmail first' })
     const options = await vs.listOptions(uid(req), gmail.sendActionVersionId, 'from', conn.auth_id)
     if (!options.some((o) => o.value === from)) return res.status(400).json({ error: 'That sender is not one of your Gmail addresses' })
-    await query(`update viasocket_connections set config = config || $3::jsonb where id = $1 and owner_id = $2`, [conn.id, uid(req), { from }])
+    await query(`update viasocket_connections set config = json_patch(config, $3) where id = $1 and owner_id = $2`, [conn.id, uid(req), { from }])
     res.json({ ok: true })
   })
 

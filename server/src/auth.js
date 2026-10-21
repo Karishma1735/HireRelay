@@ -1,20 +1,41 @@
-import { createClient } from '@supabase/supabase-js'
+import crypto from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
+import jwt from 'jsonwebtoken'
 import { config } from './config.js'
 
-/** Production token verifier: asks Supabase Auth who the bearer token belongs to. */
-export function supabaseVerifier() {
-  let client
-  return async function verify(token) {
-    if (!config.supabase.url || !(config.supabase.serviceKey || config.supabase.anonKey)) {
-      throw Object.assign(new Error('Supabase is not configured'), { status: 503, code: 'supabase_not_configured' })
-    }
-    client ||= createClient(config.supabase.url, config.supabase.serviceKey || config.supabase.anonKey, {
-      auth: { persistSession: false, autoRefreshToken: false }
-    })
-    const { data, error } = await client.auth.getUser(token)
-    if (error || !data?.user) return null
-    return { id: data.user.id, email: data.user.email }
+// Session tokens are HS256 JWTs signed with SESSION_SECRET, or a random secret generated once and kept in DATA_DIR.
+let secret
+function sessionSecret() {
+  if (secret) return secret
+  if (config.sessionSecret) return (secret = config.sessionSecret)
+  const file = path.join(config.dataDir, 'session-secret')
+  try { secret = fs.readFileSync(file, 'utf8').trim() } catch {
+    fs.mkdirSync(config.dataDir, { recursive: true })
+    secret = crypto.randomBytes(48).toString('hex')
+    fs.writeFileSync(file, secret, { mode: 0o600 })
   }
+  return secret
+}
+
+export const signSession = (user) => jwt.sign({ sub: user.id, email: user.email }, sessionSecret(), { algorithm: 'HS256', expiresIn: '30d' })
+
+export async function localVerifier(token) {
+  try {
+    const p = jwt.verify(token, sessionSecret(), { algorithms: ['HS256'] })
+    return { id: p.sub, email: p.email }
+  } catch { return null }
+}
+
+export function hashPassword(password) {
+  const salt = crypto.randomBytes(16)
+  return `${salt.toString('hex')}:${crypto.scryptSync(password, salt, 64).toString('hex')}`
+}
+export function checkPassword(password, stored) {
+  const [salt, hash] = String(stored).split(':')
+  if (!salt || !hash) return false
+  const a = crypto.scryptSync(password, Buffer.from(salt, 'hex'), 64); const b = Buffer.from(hash, 'hex')
+  return a.length === b.length && crypto.timingSafeEqual(a, b)
 }
 
 export function requireAuth(verify) {

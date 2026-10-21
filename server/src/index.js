@@ -8,6 +8,8 @@ try { process.loadEnvFile(path.join(root, '.env')) } catch { /* no .env file */ 
 
 const { createApp } = await import('./app.js')
 const { config } = await import('./config.js')
+const { getDb } = await import('./db.js')
+await getDb() // open (and migrate) the database before accepting traffic
 
 const dist = path.join(root, 'client/dist')
 const app = createApp({ staticDir: fs.existsSync(dist) ? dist : undefined })

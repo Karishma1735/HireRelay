@@ -11,12 +11,26 @@ after(() => t.stop())
 const ingest = (event, key = ingestKeyFor(drive.id)) => t.anon('POST', '/api/ingest/google-forms', { drive_id: drive.id, event }, { 'x-hirerelay-ingest-key': key })
 const metrics = async (who = 'a') => (await t[who]('GET', '/api/dashboard')).body.metrics
 
+test('accounts: signup validates, login checks the password, sessions gate HR routes', async () => {
+  assert.equal((await t.anon('POST', '/api/auth/signup', { email: 'x@hr.test', password: 'short' })).status, 400)
+  assert.equal((await t.anon('POST', '/api/auth/signup', { email: 'A@hr.test', password: 'correct-horse-9' })).status, 409) // case-insensitive duplicate
+  const ok = await t.anon('POST', '/api/auth/login', { email: 'a@hr.test', password: 'correct-horse-9' })
+  assert.equal(ok.status, 200); assert.ok(ok.body.token)
+  assert.equal((await t.anon('POST', '/api/auth/login', { email: 'a@hr.test', password: 'wrong-password' })).status, 401)
+  assert.equal((await t.anon('POST', '/api/auth/login', { email: 'nobody@hr.test', password: 'correct-horse-9' })).status, 401)
+  assert.equal((await t.anon('GET', '/api/drives', undefined, { authorization: 'Bearer garbage' })).status, 401)
+  assert.equal((await fetchWith(ok.body.token)).status, 200)
+})
+
+const fetchWith = (token) => t.anon('GET', '/api/drives', undefined, { authorization: `Bearer ${token}` })
+
 test('requires auth for HR routes, none for health/config', async () => {
   assert.equal((await t.anon('GET', '/api/drives')).status, 401)
   assert.equal((await t.anon('GET', '/api/health')).status, 200)
   const cfg = (await t.anon('GET', '/api/config')).body
   assert.equal(cfg.setup.viasocketReady, false) // secret unset in tests
   assert.ok(!JSON.stringify(cfg).includes('test-ingest-secret'))
+  assert.ok(!('supabaseUrl' in cfg))
 })
 
 test('dashboard starts at zero from real data', async () => {
@@ -142,4 +156,18 @@ test('viaSocket handler is valid JavaScript with the key and drive baked in', ()
   const AsyncFn = Object.getPrototypeOf(async function () {}).constructor
   assert.doesNotThrow(() => new AsyncFn('context', 'axios', code))
   assert.ok(code.includes(drive.id) && code.includes('x-hirerelay-ingest-key'))
+})
+
+test('agent snapshot and the queries it feeds run against real data', async () => {
+  const { buildSnapshot, validProposals } = await import('../src/lib/agent.js')
+  const { one } = await import('../src/db.js')
+  const snap = await buildSnapshot(t.users.a.id)
+  assert.equal(snap.metrics.total, (await metrics()).total)
+  assert.ok(snap.waiting_list.length >= 1) // "Queue Person" is waiting from an earlier test
+  const w = snap.waiting_list[0]
+  const c = await one(`select c.*, json_object('name', d.name, 'role_title', d.role_title, 'venue', d.venue, 'drive_date', d.drive_date) as drive from candidates c join drives d on d.id = c.drive_id where c.id = $1 and c.owner_id = $2 and c.email is not null`, [w.id, t.users.a.id])
+  assert.equal(c.drive.name, 'Support Walk-in')
+  // Proposals pointing at rows that are not in the snapshot are dropped.
+  const kept = validProposals([{ type: 'interview_reminder', candidate_id: w.id }, { type: 'interview_reminder', candidate_id: 'made-up' }, { type: 'feedback_reminder', interviewer_id: 'nope' }], snap)
+  assert.equal(kept.length, 1)
 })

@@ -19,8 +19,8 @@ export function hrRoutes() {
   // ---------- drives ----------
   r.get('/drives', async (req, res) => {
     res.json(await many(
-      `select d.*, count(c.id)::int as candidate_count,
-              count(c.id) filter (where c.checked_in_at is not null)::int as checked_in_count,
+      `select d.*, count(c.id) as candidate_count,
+              count(c.id) filter (where c.checked_in_at is not null) as checked_in_count,
               (select s.script_id is not null from viasocket_subscriptions s where s.drive_id = d.id and s.status = 'active' limit 1) as google_form_connected
        from drives d left join candidates c on c.drive_id = d.id
        where d.owner_id = $1 group by d.id order by d.created_at desc`, [owner(req)]))
@@ -57,7 +57,7 @@ export function hrRoutes() {
 
   // ---------- interviewers ----------
   r.get('/interviewers', async (req, res) => res.json(await many(
-    `select i.*, (select count(*)::int from candidates c where c.interviewer_id = i.id and c.stage = 'in_interview') as in_interview
+    `select i.*, (select count(*) from candidates c where c.interviewer_id = i.id and c.stage = 'in_interview') as in_interview
      from interviewers i where owner_id = $1 order by name`, [owner(req)])))
   r.post('/interviewers', async (req, res) => {
     const b = z.object({ name: z.string().trim().min(2).max(120), email: opt(z.string().email()) }).parse(req.body)
@@ -78,9 +78,9 @@ export function hrRoutes() {
       `select c.*, d.name as drive_name, i.name as interviewer_name, (f.id is not null) as has_feedback
        from candidates c join drives d on d.id = c.drive_id
        left join interviewers i on i.id = c.interviewer_id left join feedback f on f.candidate_id = c.id
-       where c.owner_id = $1 and ($2::uuid is null or c.drive_id = $2) and ($3::text is null or c.stage = $3)
-         and ($4::text is null or c.full_name ilike '%'||$4||'%' or c.email ilike '%'||$4||'%' or c.phone ilike '%'||$4||'%')
-         and ($5::boolean is not true or (c.interview_completed_at is not null and f.id is null))
+       where c.owner_id = $1 and ($2 is null or c.drive_id = $2) and ($3 is null or c.stage = $3)
+         and ($4 is null or c.full_name like '%'||$4||'%' or c.email like '%'||$4||'%' or c.phone like '%'||$4||'%')
+         and ($5 is null or (c.interview_completed_at is not null and f.id is null))
        order by case c.stage when 'in_interview' then 0 when 'waiting' then 1 else 2 end, c.queue_number nulls last, c.created_at desc limit $6`,
       [owner(req), q.drive_id ?? null, q.stage ?? null, q.q ?? null, q.pending_feedback === '1' ? true : null, q.limit]))
   })
@@ -138,7 +138,7 @@ export function hrRoutes() {
     const [metrics, waiting, pending, recentSync, recentRuns] = await Promise.all([
       dashboardMetrics(owner(req), driveId), waitingList(owner(req), driveId, 20), pendingFeedbackList(owner(req), driveId, 20),
       many(`select e.id, e.source, e.outcome, e.message, e.created_at, c.full_name from ingest_events e left join candidates c on c.id = e.candidate_id
-            where e.owner_id = $1 and ($2::uuid is null or e.drive_id = $2) order by e.created_at desc limit 8`, [owner(req), driveId]),
+            where e.owner_id = $1 and ($2 is null or e.drive_id = $2) order by e.created_at desc limit 8`, [owner(req), driveId]),
       many(`select id, kind, status, error, started_at, finished_at from workflow_runs where owner_id = $1 order by started_at desc limit 8`, [owner(req)])
     ])
     res.json({ metrics, waiting, pending_feedback: pending, recent_sync: recentSync, recent_runs: recentRuns })
@@ -149,7 +149,7 @@ export function hrRoutes() {
     const status = z.enum(['pending', 'approved', 'rejected', 'executed', 'failed']).optional().parse(req.query.status)
     res.json(await many(
       `select a.*, c.full_name as candidate_name from approvals a left join candidates c on c.id = a.candidate_id
-       where a.owner_id = $1 and ($2::text is null or a.status = $2) order by a.created_at desc limit 200`, [owner(req), status ?? null]))
+       where a.owner_id = $1 and ($2 is null or a.status = $2) order by a.created_at desc limit 200`, [owner(req), status ?? null]))
   })
   r.post('/approvals/:id/approve', async (req, res) => {
     const out = await approveAndExecute(owner(req), uuid.parse(req.params.id))
@@ -174,8 +174,8 @@ export function hrRoutes() {
       [owner(req), purpose, candidateId, to])
     if (b.type === 'interview_reminders') {
       const rows = await many(
-        `select c.*, row_to_json(d) as drive from candidates c join drives d on d.id = c.drive_id
-         where c.owner_id = $1 and c.stage = 'waiting' and c.email is not null and ($2::uuid is null or c.drive_id = $2)`, [owner(req), b.drive_id ?? null])
+        `select c.*, json_object('name', d.name, 'role_title', d.role_title, 'venue', d.venue, 'drive_date', d.drive_date) as drive from candidates c join drives d on d.id = c.drive_id
+         where c.owner_id = $1 and c.stage = 'waiting' and c.email is not null and ($2 is null or c.drive_id = $2)`, [owner(req), b.drive_id ?? null])
       for (const c of rows) {
         if (await pendingFor('interview_reminder', c.id, null)) continue
         created.push(await requestApproval(owner(req), { email: interviewReminder(c, c.drive), candidateId: c.id, requestedBy: 'hr', title: `Interview reminder to ${c.full_name}` }))

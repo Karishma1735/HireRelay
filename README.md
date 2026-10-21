@@ -3,25 +3,26 @@
 AI-powered walk-in hiring coordinator. Candidates register (built-in shareable form, or a Google Form synced by **viaSocket**), HR watches a live dashboard, runs the queue, records feedback, and an AI agent — also running on viaSocket — answers questions from live data and prepares reminders that HR approves before **viaSocket** sends them through Gmail.
 
 ```
-Candidate submits form ─► viaSocket handler ─► POST /api/ingest/google-forms ─► de-dupe + insert (Postgres)
+Candidate submits form ─► viaSocket handler ─► POST /api/ingest/google-forms ─► de-dupe + insert (SQLite)
                                                                                │
 Dashboard (polls DB) ◄─────────────────────────────────────────────────────────┘
 AI agent: live snapshot ─► viaSocket AI (JSON) ─► proposals validated vs real rows ─► Approvals queue
 HR approves ─► viaSocket runs Gmail "Send Email" on the user's script_id ─► result logged in workflow_runs
 ```
 
-**Stack:** React + Tailwind (Vite) · Node + Express · Supabase (Auth + Postgres) · viaSocket (Google Forms trigger, Gmail action, AI, prebuilt integrations UI).
+**Stack:** React + Tailwind (Vite) · Node + Express · SQLite (better-sqlite3, one file under `DATA_DIR`) with built-in email/password login · viaSocket (Google Forms trigger, Gmail action, AI, prebuilt integrations UI).
 
 ## Run it
 
 ```bash
 npm install
-npx supabase start            # local Supabase (needs Docker); `npx supabase db reset` applies supabase/migrations
-cp .env.example .env          # fill SUPABASE_*, DATABASE_URL from `npx supabase status`
-npm run dev                   # API :8787, web :5173 (single root package.json)
+cp .env.example .env     # optional locally; add VIASOCKET_EMBED_SECRET etc.
+npm run dev              # API :8787, web :5173
 ```
 
-The app has a **Setup** screen (shown automatically when Supabase is missing; always at `/setup`) listing exactly which values are set. A feature that needs a missing value stays off and says why — nothing pretends to work.
+Data lives in `./data/hirerelay.db` (or `DATA_DIR`). Sign up on the login screen; each HR user only sees their own drives and candidates. There is no database to provision.
+
+The app has a **Setup** screen (`/setup`) listing exactly which viaSocket values are set. A feature that needs a missing value stays off and says why — nothing pretends to work.
 
 ### viaSocket values
 `VIASOCKET_ORG_ID` and `VIASOCKET_PROJECT_ID` are in `.env.example`. `VIASOCKET_EMBED_SECRET` comes from **viaSocket → Integrations → the embed → Install Code**. It is read only by the server and used to sign per-user embed tokens.
@@ -42,7 +43,7 @@ The app has a **Setup** screen (shown automatically when Supabase is missing; al
 - **Secrets:** embed secret, `script_id`s and ingest keys never reach the browser. The browser receives an embed token only to open the Connect popup / prebuilt UI.
 
 ## Deployed on Embarko
-Live at https://hirerelay.embarko.app (one Node process: `npm run build` builds the client, `npm start` serves API + UI). Non-secret viaSocket values, `INGEST_SECRET` and `HIRERELAY_PUBLIC_URL` are set as Embarko env vars. Still to add there: `VIASOCKET_EMBED_SECRET`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` (a hosted Supabase project — Embarko has no managed database). Until then the app shows its Setup screen.
+Live at https://hirerelay.embarko.app (one Node process: `npm run build` builds the client, `npm start` serves API + UI). The SQLite file lives in Embarko's `DATA_DIR`, so it survives redeploys; **it is not backed up**. Only `VIASOCKET_EMBED_SECRET` still needs adding in the Embarko environment settings for connecting apps, the AI agent and sending email.
 
 ## Tests
-`npm test` runs against a real Postgres (`TEST_DATABASE_URL`, default `postgresql://postgres@localhost:54399/hirerelay_test`; the schema is dropped and recreated). Only Supabase Auth is replaced, by an injected verifier. `npm run check:viasocket` validates every viaSocket id/URL in the code against the live catalog.
+`npm test` runs against the real SQLite layer (in memory) and the real signup/login routes, with no mocks. `npm run check:viasocket` validates every viaSocket id/URL in the code against the live catalog.

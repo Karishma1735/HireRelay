@@ -3,5 +3,6 @@
 !.env.example
 node_modules/
 dist/
+data/
 viasocket-skill.md
 .claude/skills/viasocket/apps/

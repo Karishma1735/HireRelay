@@ -1,3 +1,4 @@
+import path from 'node:path'
 // All configuration is read from the environment at call time so tests and the setup screen see live values.
 const env = (k) => (process.env[k] || '').trim()
 
@@ -6,12 +7,8 @@ export const config = {
   get corsOrigins() { return env('CORS_ORIGIN').split(',').map((s) => s.trim()).filter(Boolean) },
   get publicUrl() { return env('HIRERELAY_PUBLIC_URL').replace(/\/+$/, '') },
   get ingestSecret() { return env('INGEST_SECRET') },
-  supabase: {
-    get url() { return env('SUPABASE_URL') },
-    get anonKey() { return env('SUPABASE_ANON_KEY') },
-    get serviceKey() { return env('SUPABASE_SERVICE_ROLE_KEY') }
-  },
-  get databaseUrl() { return env('DATABASE_URL') },
+  get dataDir() { return env('DATA_DIR') || path.resolve(process.cwd(), 'data') },
+  get sessionSecret() { return env('SESSION_SECRET') },
   viasocket: {
     get orgId() { return env('VIASOCKET_ORG_ID') },
     get projectId() { return env('VIASOCKET_PROJECT_ID') },
@@ -37,10 +34,6 @@ export const config = {
 /** What is configured, as booleans only: values never leave the server. */
 export function setupStatus() {
   const items = [
-    { key: 'SUPABASE_URL', label: 'Supabase URL', ok: !!config.supabase.url, group: 'supabase' },
-    { key: 'SUPABASE_ANON_KEY', label: 'Supabase anon key', ok: !!config.supabase.anonKey, group: 'supabase' },
-    { key: 'SUPABASE_SERVICE_ROLE_KEY', label: 'Supabase service role key', ok: !!config.supabase.serviceKey, group: 'supabase' },
-    { key: 'DATABASE_URL', label: 'Database URL', ok: !!config.databaseUrl, group: 'supabase' },
     { key: 'VIASOCKET_ORG_ID', label: 'viaSocket org id', ok: !!config.viasocket.orgId, group: 'viasocket' },
     { key: 'VIASOCKET_PROJECT_ID', label: 'viaSocket project id', ok: !!config.viasocket.projectId, group: 'viasocket' },
     { key: 'VIASOCKET_API_URL', label: 'viaSocket API URL', ok: !!config.viasocket.apiUrl, group: 'viasocket' },
@@ -51,7 +44,6 @@ export function setupStatus() {
   ]
   return {
     items,
-    supabaseReady: items.filter((i) => i.group === 'supabase').every((i) => i.ok),
     viasocketReady: items.filter((i) => i.group === 'viasocket').every((i) => i.ok)
   }
 }

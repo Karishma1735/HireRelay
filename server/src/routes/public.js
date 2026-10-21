@@ -35,10 +35,8 @@ export function publicRoutes() {
 
   r.get('/health', (_req, res) => res.json({ ok: true }))
 
-  // Public values only: the anon key is designed to be shipped to browsers.
+  // Only whether things are set, never the values.
   r.get('/config', (_req, res) => res.json({
-    supabaseUrl: config.supabase.url || null,
-    supabaseAnonKey: config.supabase.anonKey || null,
     setup: setupStatus()
   }))
 

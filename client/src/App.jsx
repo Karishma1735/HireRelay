@@ -1,7 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './lib/auth.jsx'
 import Layout from './components/Layout.jsx'
-import { Spinner } from './components/ui.jsx'
 import Login from './pages/Login.jsx'
 import Apply from './pages/Apply.jsx'
 import Setup from './pages/Setup.jsx'
@@ -15,13 +14,11 @@ import Approvals from './pages/Approvals.jsx'
 import Integrations from './pages/Integrations.jsx'
 
 export default function App() {
-  const { loading, session, supabase } = useAuth()
+  const { session } = useAuth()
   return (
     <Routes>
       <Route path="/apply/:slug" element={<Apply />} />
-      {loading ? <Route path="*" element={<Spinner />} />
-        : !supabase ? <Route path="*" element={<Setup standalone />} />
-        : !session ? <Route path="*" element={<Login />} />
+      {!session ? <Route path="*" element={<Login />} />
         : (
           <Route element={<Layout />}>
             <Route index element={<Dashboard />} />

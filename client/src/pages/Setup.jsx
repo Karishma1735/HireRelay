@@ -3,8 +3,7 @@ import { CheckCircle2, Circle } from 'lucide-react'
 import { Card, Spinner } from '../components/ui.jsx'
 
 const GROUPS = {
-  supabase: ['Supabase', <>Run <code>npx supabase start</code> (local), then <code>npx supabase db reset</code> to apply <code>supabase/migrations</code>. <code>npx supabase status</code> prints the URL and keys. Put them in <code>.env</code> and restart the server.</>],
-  viasocket: ['viaSocket', <>Open <b>viaSocket → Integrations → the embed → Install Code</b> (click <b>Create embed</b> if there is none) and copy the org id, project id and embed secret into <code>.env</code>. The secret stays on the server.</>],
+  viasocket: ['viaSocket', <>Open <b>viaSocket → Integrations → the embed → Install Code</b> (click <b>Create embed</b> if there is none) and copy the org id, project id and embed secret into <code>.env</code> (or the hosting environment settings). The secret stays on the server.</>],
   hirerelay: ['HireRelay', <><code>INGEST_SECRET</code> is any long random string. <code>HIRERELAY_PUBLIC_URL</code> must be reachable from viaSocket&apos;s servers (a tunnel in development, your domain in production) — Google Forms responses are delivered there.</>]
 }
 
