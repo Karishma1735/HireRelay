@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Search } from 'lucide-react'
-import { get, post, patch } from '../lib/api.js'
+import { Search, Trash2 } from 'lucide-react'
+import { get, post, patch, del } from '../lib/api.js'
 import { STAGE_LABEL } from '../lib/format.js'
 import { Alert, Button, Empty, Field, Modal, Spinner, StageBadge } from './ui.jsx'
 
@@ -14,13 +14,21 @@ const CAN_NO_SHOW = new Set(['registered', 'checked_in', 'waiting'])
 export default function CandidateTable({ driveId, initialPendingFeedback = false }) {
   const qc = useQueryClient()
   const [q, setQ] = useState(''); const [stage, setStage] = useState(''); const [pendingFb, setPendingFb] = useState(initialPendingFeedback)
-  const [open, setOpen] = useState(null); const [error, setError] = useState('')
+  const [open, setOpen] = useState(null); const [error, setError] = useState(''); const [sel, setSel] = useState(new Set())
   const params = new URLSearchParams({ ...(driveId && { drive_id: driveId }), ...(stage && { stage }), ...(q && { q }), ...(pendingFb && { pending_feedback: '1' }) })
   const list = useQuery({ queryKey: ['candidates', params.toString()], queryFn: () => get(`/candidates?${params}`), refetchInterval: 5000 })
   const ivs = useQuery({ queryKey: ['interviewers'], queryFn: () => get('/interviewers') })
   const refresh = () => { qc.invalidateQueries({ queryKey: ['candidates'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); qc.invalidateQueries({ queryKey: ['drives'] }) }
   const move = useMutation({ mutationFn: ({ id, stage }) => post(`/candidates/${id}/stage`, { stage }), onSuccess: () => { setError(''); refresh() }, onError: (e) => setError(e.message) })
   const assign = useMutation({ mutationFn: ({ id, interviewer_id }) => patch(`/candidates/${id}/interviewer`, { interviewer_id: interviewer_id || null }), onSuccess: refresh, onError: (e) => setError(e.message) })
+  const remove = useMutation({
+    mutationFn: (ids) => post('/candidates/delete', { ids }),
+    onSuccess: () => { setSel(new Set()); setError(''); refresh() }, onError: (e) => setError(e.message)
+  })
+  const askDelete = (ids, label) => confirm(`Delete ${label}? Their feedback and any email waiting for approval are deleted too. This cannot be undone.`) && remove.mutate(ids)
+  const toggle = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const rows = list.data || []
+  const allSelected = rows.length > 0 && rows.every((c) => sel.has(c.id))
   const activeIvs = (ivs.data || []).filter((i) => i.active)
 
   return (
@@ -31,13 +39,20 @@ export default function CandidateTable({ driveId, initialPendingFeedback = false
         <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={pendingFb} onChange={(e) => setPendingFb(e.target.checked)} /> Pending feedback</label>
       </div>
       {error && <Alert>{error}</Alert>}
+      {sel.size > 0 && (
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <span>{sel.size} selected</span>
+          <div className="flex gap-2"><Button size="sm" variant="ghost" onClick={() => setSel(new Set())}>Clear</Button>
+            <Button size="sm" variant="danger" loading={remove.isPending} onClick={() => askDelete([...sel], `${sel.size} candidate${sel.size > 1 ? 's' : ''}`)}>Delete selected</Button></div>
+        </div>)}
       {list.isLoading ? <Spinner /> : !list.data?.length ? <Empty>No candidates match.</Empty> : (
         <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
           <table className="w-full min-w-[760px] text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">#</th><th className="px-3 py-2">Candidate</th>{!driveId && <th className="px-3 py-2">Drive</th>}<th className="px-3 py-2">Stage</th><th className="px-3 py-2">Interviewer</th><th className="px-3 py-2 text-right">Actions</th></tr></thead>
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="w-8 px-3 py-2"><input type="checkbox" aria-label="Select all" checked={allSelected} onChange={() => setSel(allSelected ? new Set() : new Set(rows.map((c) => c.id)))} /></th><th className="px-3 py-2">#</th><th className="px-3 py-2">Candidate</th>{!driveId && <th className="px-3 py-2">Drive</th>}<th className="px-3 py-2">Stage</th><th className="px-3 py-2">Interviewer</th><th className="px-3 py-2 text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
               {list.data.map((c) => (
-                <tr key={c.id} className="hover:bg-slate-50">
+                <tr key={c.id} className={`hover:bg-slate-50 ${sel.has(c.id) ? 'bg-indigo-50/50' : ''}`}>
+                  <td className="px-3 py-2"><input type="checkbox" aria-label={`Select ${c.full_name}`} checked={sel.has(c.id)} onChange={() => toggle(c.id)} /></td>
                   <td className="px-3 py-2 tabular-nums text-slate-400">{c.queue_number ?? ''}</td>
                   <td className="px-3 py-2"><button className="text-left font-medium text-slate-900 hover:text-indigo-700" onClick={() => setOpen(c.id)}>{c.full_name}</button>
                     <div className="text-xs text-slate-500">{[c.email, c.phone].filter(Boolean).join(' · ')}</div></td>
@@ -53,6 +68,7 @@ export default function CandidateTable({ driveId, initialPendingFeedback = false
                         loading={move.isPending && move.variables?.id === c.id && move.variables?.stage === to} onClick={() => move.mutate({ id: c.id, stage: to })}>{label}</Button>))}
                     {c.interview_completed_at && !c.has_feedback && <Button size="sm" onClick={() => setOpen(c.id)}>Feedback</Button>}
                     {CAN_NO_SHOW.has(c.stage) && <Button size="sm" variant="ghost" onClick={() => move.mutate({ id: c.id, stage: 'no_show' })}>No show</Button>}
+                    <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => askDelete([c.id], c.full_name)} aria-label={`Delete ${c.full_name}`}><Trash2 className="h-3.5 w-3.5" /></Button>
                   </div></td>
                 </tr>))}
             </tbody>
@@ -89,7 +105,13 @@ function CandidateModal({ id, onClose }) {
                 <Field label="Recommendation"><select className="input" value={fb.recommendation} onChange={(e) => setFb({ ...fb, recommendation: e.target.value })}><option value="hire">Hire</option><option value="hold">Hold</option><option value="reject">Reject</option></select></Field>
               </div>
               <Field label="Notes"><textarea className="input" rows={3} value={fb.notes} onChange={(e) => setFb({ ...fb, notes: e.target.value })} /></Field>
-              {error && <Alert>{error}</Alert>}<Button loading={save.isPending}>Save feedback</Button></form>)}
+              {error && <Alert>{error}</Alert>}
+      {sel.size > 0 && (
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <span>{sel.size} selected</span>
+          <div className="flex gap-2"><Button size="sm" variant="ghost" onClick={() => setSel(new Set())}>Clear</Button>
+            <Button size="sm" variant="danger" loading={remove.isPending} onClick={() => askDelete([...sel], `${sel.size} candidate${sel.size > 1 ? 's' : ''}`)}>Delete selected</Button></div>
+        </div>)}<Button loading={save.isPending}>Save feedback</Button></form>)}
         </div>
       </div>)}
     </Modal>

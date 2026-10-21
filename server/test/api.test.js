@@ -194,3 +194,18 @@ test('an email only counts as sent when Gmail returns a message id (viaSocket an
     assert.equal(again.body.status, 'executed')
   } finally { globalThis.fetch = realFetch }
 })
+
+test('deleting candidates removes them, their feedback and pending emails, and respects ownership', async () => {
+  const mk = async (name) => (await t.a('POST', '/api/candidates', { drive_id: drive.id, full_name: name, email: `${name.replace(' ', '').toLowerCase()}@example.com` })).body
+  const [x, y] = [await mk('Delete One'), await mk('Delete Two')]
+  const before = (await metrics()).total
+  assert.ok((await t.a('GET', '/api/approvals?status=pending')).body.some((a) => a.candidate_id === x.id))
+  assert.equal((await t.b('DELETE', `/api/candidates/${x.id}`)).status, 404) // not theirs
+  assert.equal((await t.a('DELETE', `/api/candidates/${x.id}`)).status, 200)
+  assert.equal((await t.a('DELETE', `/api/candidates/${x.id}`)).status, 404)
+  assert.ok(!(await t.a('GET', '/api/approvals?status=pending')).body.some((a) => a.candidate_id === x.id)) // queued email gone
+  const bulk = await t.a('POST', '/api/candidates/delete', { ids: [y.id, x.id, '00000000-0000-4000-8000-000000000000'] })
+  assert.equal(bulk.body.deleted, 1)
+  assert.equal((await metrics()).total, before - 2)
+  assert.equal((await t.b('POST', '/api/candidates/delete', { ids: [(await t.a('GET', '/api/candidates')).body[0].id] })).body.deleted, 0)
+})

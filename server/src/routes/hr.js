@@ -106,6 +106,25 @@ export function hrRoutes() {
     res.status(201).json(result.candidate)
   })
 
+  // Deleting a candidate also drops their feedback and any email still waiting for approval.
+  const deleteCandidates = async (ownerId, ids) => {
+    let deleted = 0
+    for (const id of ids) {
+      if (!(await one('select 1 from candidates where id = $1 and owner_id = $2', [id, ownerId]))) continue
+      await query(`delete from approvals where owner_id = $1 and candidate_id = $2 and status = 'pending'`, [ownerId, id])
+      await query('delete from candidates where id = $1 and owner_id = $2', [id, ownerId]); deleted++
+    }
+    return deleted
+  }
+  r.delete('/candidates/:id', async (req, res) => {
+    const n = await deleteCandidates(owner(req), [uuid.parse(req.params.id)])
+    n ? res.json({ deleted: n }) : res.status(404).json({ error: 'Candidate not found' })
+  })
+  r.post('/candidates/delete', async (req, res) => {
+    const { ids } = z.object({ ids: z.array(uuid).min(1).max(500) }).parse(req.body)
+    res.json({ deleted: await deleteCandidates(owner(req), ids) })
+  })
+
   r.post('/candidates/:id/stage', async (req, res) => {
     const b = z.object({ stage: z.enum(STAGES), interviewer_id: uuid.optional() }).parse(req.body)
     const out = await changeStage(owner(req), uuid.parse(req.params.id), b.stage, { interviewerId: b.interviewer_id })
