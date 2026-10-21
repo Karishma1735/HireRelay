@@ -16,8 +16,8 @@ export const config = {
     get orgId() { return env('VIASOCKET_ORG_ID') },
     get projectId() { return env('VIASOCKET_PROJECT_ID') },
     get secret() { return env('VIASOCKET_EMBED_SECRET') },
-    apiUrl: 'https://flow-api.viasocket.com',
-    runUrl: 'https://flow.sokt.io',
+    get apiUrl() { return env('VIASOCKET_API_URL') },
+    get runUrl() { return env('VIASOCKET_RUN_URL') },
     // Verified against the app documents (flow.viasocket.com/documentation/<service_id>.md).
     forms: {
       serviceId: 'rowshu8t54lr',
@@ -43,6 +43,8 @@ export function setupStatus() {
     { key: 'DATABASE_URL', label: 'Database URL', ok: !!config.databaseUrl, group: 'supabase' },
     { key: 'VIASOCKET_ORG_ID', label: 'viaSocket org id', ok: !!config.viasocket.orgId, group: 'viasocket' },
     { key: 'VIASOCKET_PROJECT_ID', label: 'viaSocket project id', ok: !!config.viasocket.projectId, group: 'viasocket' },
+    { key: 'VIASOCKET_API_URL', label: 'viaSocket API URL', ok: !!config.viasocket.apiUrl, group: 'viasocket' },
+    { key: 'VIASOCKET_RUN_URL', label: 'viaSocket run URL', ok: !!config.viasocket.runUrl, group: 'viasocket' },
     { key: 'VIASOCKET_EMBED_SECRET', label: 'viaSocket embed secret', ok: !!config.viasocket.secret, group: 'viasocket' },
     { key: 'INGEST_SECRET', label: 'Ingest signing secret', ok: !!config.ingestSecret, group: 'hirerelay' },
     { key: 'HIRERELAY_PUBLIC_URL', label: 'Public URL for viaSocket handlers', ok: isPublicUrl(config.publicUrl), group: 'hirerelay' }

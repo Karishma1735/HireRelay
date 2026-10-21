@@ -7,12 +7,14 @@ export class ViaSocketError extends Error {
   }
 }
 
-export const isConfigured = () => !!(config.viasocket.orgId && config.viasocket.projectId && config.viasocket.secret)
+export const isConfigured = () => !!(config.viasocket.orgId && config.viasocket.projectId && config.viasocket.secret && config.viasocket.apiUrl && config.viasocket.runUrl)
 
 export function missingConfig() {
   return [
     ['VIASOCKET_ORG_ID', config.viasocket.orgId],
     ['VIASOCKET_PROJECT_ID', config.viasocket.projectId],
+    ['VIASOCKET_API_URL', config.viasocket.apiUrl],
+    ['VIASOCKET_RUN_URL', config.viasocket.runUrl],
     ['VIASOCKET_EMBED_SECRET', config.viasocket.secret]
   ].filter(([, v]) => !v).map(([k]) => k)
 }

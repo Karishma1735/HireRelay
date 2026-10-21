@@ -13,6 +13,8 @@ process.env.DATABASE_URL = TEST_DB
 process.env.INGEST_SECRET = 'test-ingest-secret'
 process.env.VIASOCKET_ORG_ID = '80251'
 process.env.VIASOCKET_PROJECT_ID = 'proj1pVRqxu9'
+process.env.VIASOCKET_API_URL = 'https://flow-api.viasocket.com'
+process.env.VIASOCKET_RUN_URL = 'https://flow.sokt.io'
 delete process.env.VIASOCKET_EMBED_SECRET
 
 const migration = fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../supabase/migrations/20261021000000_init.sql'), 'utf8')
