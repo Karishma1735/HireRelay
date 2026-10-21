@@ -1,9 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import sqlite from 'node-sqlite3-wasm' // SQLite compiled to WebAssembly: no native addon to mismatch with the host
-
-const { Database } = sqlite
+import { DatabaseSync } from 'node:sqlite' // built into Node >= 22.13: no native addon, supports WAL
 import { config } from './config.js'
 
 // SQLite under DATA_DIR: the one file survives redeploys. DB_MEMORY=1 keeps it in memory (tests).
@@ -22,15 +20,21 @@ export function getDb() {
   if (db) return db
   let file = ':memory:'
   if (!process.env.DB_MEMORY) { fs.mkdirSync(config.dataDir, { recursive: true }); file = path.join(config.dataDir, 'hirerelay.db') }
-  // node-sqlite3-wasm locks with a `<file>.lock` folder; a killed process leaves it behind and blocks every query.
-  // This app is the only writer, so a lock found at boot is always stale.
-  if (file !== ':memory:') fs.rmSync(`${file}.lock`, { recursive: true, force: true })
-  db = new Database(file)
+  db = new DatabaseSync(file)
   db.exec('pragma foreign_keys = ON')
+  if (file !== ':memory:') db.exec('pragma journal_mode = WAL') // Embarko replicates SQLite files under DATA_DIR, which needs WAL
   db.exec(schema)
   return db
 }
 export function closeDb() { if (db) { db.close(); db = undefined; cache.clear() } }
+
+/** What the boot check reports when the database cannot be opened: enough to diagnose from the host's logs. */
+export function describeStorage() {
+  const dir = config.dataDir; const out = { dir, uid: process.getuid?.(), node: process.version }
+  try { out.files = fs.readdirSync(dir).map((f) => { const st = fs.statSync(path.join(dir, f)); return `${f} ${st.size}b mode=${(st.mode & 0o777).toString(8)}` }) } catch (e) { out.listError = e.message }
+  try { fs.accessSync(dir, fs.constants.W_OK); out.writable = true } catch (e) { out.writable = false; out.writeError = e.message }
+  return out
+}
 
 const cache = new Map()
 const returnsRows = (sql) => /^\s*(select|with|pragma)\b/i.test(sql) || /\breturning\b/i.test(sql)
@@ -40,7 +44,7 @@ function compile(text) {
   if (!c) {
     const order = []
     const sql = text.replace(/\$(\d+)/g, (_, n) => { order.push(Number(n) - 1); return '?' })
-    c = { sql: expand(sql), order, reader: returnsRows(sql) }
+    c = { stmt: getDb().prepare(expand(sql)), order, reader: returnsRows(sql) }
     cache.set(text, c)
   }
   return c
@@ -56,12 +60,11 @@ function fromDb(row) {
 }
 
 export async function query(text, params = []) {
-  const { sql, order, reader } = compile(text)
+  const { stmt, order, reader } = compile(text)
   const args = order.map((i) => toDb(params[i]))
-  const d = getDb()
   try {
-    if (reader) return { rows: d.all(sql, args).map(fromDb) }
-    d.run(sql, args); return { rows: [] }
+    if (reader) return { rows: stmt.all(...args).map((r) => fromDb({ ...r })) }
+    stmt.run(...args); return { rows: [] }
   } catch (e) {
     if (/UNIQUE constraint failed/i.test(e.message)) e.code = '23505' // keep the existing unique-violation handling
     throw e

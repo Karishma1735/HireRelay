@@ -9,11 +9,15 @@ try { process.loadEnvFile(path.join(root, '.env')) } catch { /* no .env file */ 
 const { createApp } = await import('./app.js')
 const { config } = await import('./config.js')
 const { getDb } = await import('./db.js')
-const { query } = await import('./db.js')
-await getDb() // open (and migrate) the database before accepting traffic
-// Fail at boot, with a readable log, rather than on the first user request.
-await query('create table if not exists _boot (at text)'); await query('delete from _boot'); await query("insert into _boot values (strftime('%Y-%m-%dT%H:%M:%fZ','now'))")
-console.log(`database ok at ${config.dataDir}: ${fs.readdirSync(config.dataDir).join(', ')}`)
+const { describeStorage } = await import('./db.js')
+// Open (and migrate) the database before accepting traffic. If that fails, keep serving and log exactly why,
+// so the host's logs say what is wrong instead of the process dying with no output.
+try {
+  await getDb()
+  console.log('database ok', JSON.stringify(describeStorage()))
+} catch (e) {
+  console.error('DATABASE UNAVAILABLE:', e.message, JSON.stringify(describeStorage()))
+}
 
 const dist = path.join(root, 'client/dist')
 const app = createApp({ staticDir: fs.existsSync(dist) ? dist : undefined })

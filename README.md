@@ -10,7 +10,7 @@ AI agent: live snapshot ─► viaSocket AI (JSON) ─► proposals validated vs
 HR approves ─► viaSocket runs Gmail "Send Email" on the user's script_id ─► result logged in workflow_runs
 ```
 
-**Stack:** React + Tailwind (Vite) · Node + Express · SQLite (node-sqlite3-wasm, one file under `DATA_DIR`) with built-in email/password login · viaSocket (Google Forms trigger, Gmail action, AI, prebuilt integrations UI).
+**Stack:** React + Tailwind (Vite) · Node + Express · SQLite (Node built-in `node:sqlite`, WAL, one file under `DATA_DIR`) with built-in email/password login · viaSocket (Google Forms trigger, Gmail action, AI, prebuilt integrations UI).
 
 ## Run it
 
