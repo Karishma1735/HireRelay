@@ -5,7 +5,7 @@ import { one, many, query } from '../db.js'
 import { slugify } from '../lib/normalize.js'
 import { upsertFromSubmission, logIngest, changeStage, STAGES } from '../lib/candidates.js'
 import { dashboardMetrics, waitingList, pendingFeedbackList } from '../lib/metrics.js'
-import { approveAndExecute, requestApproval } from '../lib/approvals.js'
+import { approveAndExecute, requestApproval, retry } from '../lib/approvals.js'
 import { interviewReminder, feedbackReminder } from '../lib/emails.js'
 import { afterCandidateCreated } from './public.js'
 
@@ -154,6 +154,10 @@ export function hrRoutes() {
   r.post('/approvals/:id/approve', async (req, res) => {
     const out = await approveAndExecute(owner(req), uuid.parse(req.params.id))
     out ? res.json(out) : res.status(409).json({ error: 'Approval not found or already decided' })
+  })
+  r.post('/approvals/:id/retry', async (req, res) => {
+    const out = await retry(owner(req), uuid.parse(req.params.id))
+    out ? res.json(out) : res.status(409).json({ error: 'Only a sent or failed approval can be sent again' })
   })
   r.post('/approvals/:id/reject', async (req, res) => {
     const row = await one(`update approvals set status = 'rejected', decided_at = now() where id = $1 and owner_id = $2 and status = 'pending' returning *`, [uuid.parse(req.params.id), owner(req)])

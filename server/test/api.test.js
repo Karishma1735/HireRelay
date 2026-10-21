@@ -171,3 +171,26 @@ test('agent snapshot and the queries it feeds run against real data', async () =
   const kept = validProposals([{ type: 'interview_reminder', candidate_id: w.id }, { type: 'interview_reminder', candidate_id: 'made-up' }, { type: 'feedback_reminder', interviewer_id: 'nope' }], snap)
   assert.equal(kept.length, 1)
 })
+
+test('an email only counts as sent when Gmail returns a message id (viaSocket answers 200 even on app errors)', async () => {
+  const { query } = await import('../src/db.js')
+  await query(`insert into viasocket_connections (owner_id, service_id, auth_id, script_id, config) values ($1,'rowo0bqrhj5g','auth_rowo0bqrhj5g','scriTEST',$2)`, [t.users.a.id, { from: 'me@example.com' }])
+  const realFetch = globalThis.fetch
+  const answer = (body) => { globalThis.fetch = async (url, init) => String(url).includes('/func/scriTEST') ? new Response(JSON.stringify(body), { status: 200 }) : realFetch(url, init) }
+  const queue = async () => (await t.a('POST', '/api/candidates', { drive_id: drive.id, full_name: `Mail Test ${Math.random()}`, email: `m${Math.random().toString(36).slice(2)}@example.com` })).body
+  try {
+    const pending = async () => (await t.a('GET', '/api/approvals?status=pending')).body[0]
+    await queue(); answer({ success: true, data: { response: { status: 400, data: { message: 'Invalid from address' } } } })
+    const bad = await t.a('POST', `/api/approvals/${(await pending()).id}/approve`)
+    assert.equal(bad.body.status, 'failed'); assert.match(bad.body.error, /Invalid from address/)
+    await queue(); answer({ success: true, data: { ok: 'but no message id' } })
+    const noId = await t.a('POST', `/api/approvals/${(await pending()).id}/approve`)
+    assert.equal(noId.body.status, 'failed'); assert.match(noId.body.error, /message id/)
+    await queue(); answer({ success: true, data: { id: 'm_1', labelIds: ['SENT'], threadId: 't_1' } })
+    const good = await t.a('POST', `/api/approvals/${(await pending()).id}/approve`)
+    assert.equal(good.body.status, 'executed')
+    // a failed one can be retried and now succeeds
+    const again = await t.a('POST', `/api/approvals/${bad.body.id}/retry`)
+    assert.equal(again.body.status, 'executed')
+  } finally { globalThis.fetch = realFetch }
+})

@@ -50,6 +50,7 @@ export default function Approvals() {
                   <div className="text-xs text-slate-500">To {a.payload.to || 'no address'} · requested by {a.requested_by} · {ago(a.created_at)}</div>
                   {a.reason && <div className="mt-1 text-xs text-slate-600">Why: {a.reason}</div>}{a.error && <div className="mt-1 text-xs text-rose-600">{a.error}</div>}</div>
                 <div className="flex items-center gap-2"><Badge tone={TONE[a.status]}>{a.status}</Badge>
+                  {(a.status === 'failed' || a.status === 'executed') && <Button size="sm" variant="secondary" loading={act.isPending && act.variables?.id === a.id && act.variables.what === 'retry'} onClick={() => act.mutate({ id: a.id, what: 'retry' })}>{a.status === 'failed' ? 'Retry' : 'Send again'}</Button>}
                   {a.status === 'pending' && <><Button size="sm" loading={act.isPending && act.variables?.id === a.id && act.variables.what === 'approve'} onClick={() => act.mutate({ id: a.id, what: 'approve' })}>Approve & send</Button>
                     <Button size="sm" variant="secondary" onClick={() => act.mutate({ id: a.id, what: 'reject' })}>Reject</Button></>}</div>
               </div>

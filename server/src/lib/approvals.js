@@ -10,6 +10,16 @@ export async function requestApproval(ownerId, { email, candidateId = null, requ
     [ownerId, email.purpose, title, reason, { to: email.to, subject: email.subject, body: email.body }, candidateId, requestedBy])
 }
 
+/** The app's own error hidden inside a 200 envelope, or a missing Gmail message id; null when the send is proven. */
+export function appFailure(r) {
+  const nested = r?.response ?? r?.data?.response
+  if (nested && Number(nested.status) >= 400) return nested.data?.message || nested.data?.error?.message || `Gmail returned ${nested.status}`
+  if (r?.error) return typeof r.error === 'string' ? r.error : r.error.message || JSON.stringify(r.error)
+  const body = r?.data && typeof r.data === 'object' && !Array.isArray(r.data) ? r.data : r
+  if (!body?.id) return 'viaSocket did not return a Gmail message id, so the email was not confirmed as sent'
+  return null
+}
+
 /** Approve (atomically, once) and execute through viaSocket. Every outcome is written to workflow_runs. */
 export async function approveAndExecute(ownerId, approvalId) {
   const approval = await one(
@@ -37,8 +47,19 @@ export async function execute(ownerId, approval) {
     const response = await vs.runAction(conn.script_id, config.viasocket.gmail.sendActionVersionId, {
       to: approval.payload.to, subject: approval.payload.subject, messageBody: approval.payload.body, from: conn.config.from
     })
+    // viaSocket answers 200 even when the app itself failed, so success needs proof: Gmail returns the sent message's id.
+    const failure = appFailure(response)
+    if (failure) throw Object.assign(new Error(failure), { detail: response })
     return await finish('success', response, null)
   } catch (e) {
     return await finish('failed', e.detail ?? null, e.message)
   }
+}
+
+/** Run a finished approval again (a failed send, or one HR wants sent twice). */
+export async function retry(ownerId, approvalId) {
+  const a = await one(
+    `update approvals set status = 'approved', error = null, decided_at = now() where id = $1 and owner_id = $2 and status in ('failed','executed') returning *`,
+    [approvalId, ownerId])
+  return a ? execute(ownerId, a) : null
 }
