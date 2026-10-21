@@ -148,6 +148,15 @@ create table if not exists ingest_events (
 );
 create index if not exists ingest_events_owner_idx on ingest_events(owner_id, created_at desc);
 
+-- Responses whose candidate HR deleted. A form keeps returning old responses, so without this they would be re-added.
+create table if not exists deleted_responses (
+  drive_id text not null references drives(id) on delete cascade,
+  source text not null,
+  external_ref text not null,
+  deleted_at text not null default (now()),
+  primary key (drive_id, source, external_ref)
+);
+
 create table if not exists settings (
   owner_id text primary key references users(id) on delete cascade,
   auto_send_confirmations integer not null default 0,

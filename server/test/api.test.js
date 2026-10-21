@@ -353,3 +353,36 @@ test('form poller adds genuinely new responses once, and ignores stand-ins and o
     assert.equal((await t.a('POST', `/api/viasocket/drives/${drive.id}/google-form/import-latest`)).status, 404)
   } finally { globalThis.fetch = realFetch; await query('delete from viasocket_subscriptions') }
 })
+
+test('a deleted Google Form candidate stays deleted, however often the same response is delivered again', async () => {
+  const { query } = await import('../src/db.js')
+  const { pollOnce } = await import('../src/lib/formPoller.js')
+  const ev = { responseId: 'resp-gone-1', createTime: new Date().toISOString(), Full_Name: 'Comes Back', Email: 'comesback@example.com', Phone_No_: '9000022222' }
+  const count = async () => (await t.a('GET', '/api/candidates?q=comesback')).body.length
+  assert.equal((await ingest(ev)).body.outcome, 'created')
+  const c = (await t.a('GET', '/api/candidates?q=comesback')).body[0]
+  assert.equal((await t.a('DELETE', `/api/candidates/${c.id}`)).status, 200)
+  // viaSocket delivers the same response again (retry, restart, re-sync): it must not resurrect the candidate.
+  assert.equal((await ingest(ev)).body.outcome, 'skipped'); assert.equal(await count(), 0)
+  // The 30-second check, even after the app restarted (a fresh process has no memory of the response).
+  await query(`insert into viasocket_subscriptions (owner_id, drive_id, service_id, trigger_version_id, script_id, auth_id, input_data, handler) values ($1,$2,'rowshu8t54lr','row5hkzp1usn','scriGONE','auth_rowshu8t54lr',$3,'x')`, [t.users.a.id, drive.id, { id: 'form1' }])
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => String(url).includes('/func/scrijZpnr8zJ') ? new Response(JSON.stringify(ev), { status: 200 }) : realFetch(url, init)
+  try {
+    assert.equal(await pollOnce(), 0); assert.equal(await count(), 0)
+    // Deleting many at once is remembered too.
+    assert.equal((await ingest({ ...ev, responseId: 'resp-gone-2', Email: 'comesback2@example.com', Phone_No_: '9000033333' })).body.outcome, 'created')
+    const c2 = (await t.a('GET', '/api/candidates?q=comesback2')).body[0]
+    await t.a('POST', '/api/candidates/delete', { ids: [c2.id] })
+    assert.equal((await ingest({ ...ev, responseId: 'resp-gone-2', Email: 'comesback2@example.com', Phone_No_: '9000033333' })).body.outcome, 'skipped')
+    // A genuinely new response from the same person is a new registration and is accepted.
+    assert.equal((await ingest({ ...ev, responseId: 'resp-gone-3' })).body.outcome, 'created')
+    assert.equal(await count(), 1)
+    // Importing by hand is an explicit "add it back": it overrides the memory of the deletion.
+    await t.a('DELETE', `/api/candidates/${(await t.a('GET', '/api/candidates?q=comesback')).body[0].id}`)
+    reply2 = { ...ev, responseId: 'resp-gone-3' }
+    globalThis.fetch = async (url, init) => String(url).includes('/func/scrijZpnr8zJ') ? new Response(JSON.stringify(reply2), { status: 200 }) : realFetch(url, init)
+    assert.equal((await t.a('POST', `/api/viasocket/drives/${drive.id}/google-form/import-latest`)).body.outcome, 'created')
+  } finally { globalThis.fetch = realFetch; await query('delete from viasocket_subscriptions') }
+})
+let reply2

@@ -155,7 +155,7 @@ export function viasocketRoutes() {
     const { viasocket_help, ...event } = (await vs.sampleTriggerEvent(forms.triggerId, sub.auth_id, forms.authType, sub.input_data)) || {}
     if (Object.keys(event).length && !isRealResponse(event) && !event.response) return res.status(404).json({ error: 'This form has no responses yet (viaSocket only returned a placeholder). Submit a response, then try again.' })
     if (!Object.keys(event).length || event.response?.status >= 400) return res.status(502).json({ error: event.response?.data?.message || 'viaSocket returned no response for this form. Submit a response to the form first.' })
-    const result = await upsertFromSubmission({ drive, raw: event, source: 'google_forms' })
+    const result = await upsertFromSubmission({ drive, raw: event, source: 'google_forms', force: true }) // clicking Import means "add it", even if it was deleted before
     await logIngest(drive.owner_id, drive.id, 'google_forms', result, event)
     if (result.outcome === 'rejected') return res.status(422).json({ error: result.message })
     if (result.outcome === 'created') await afterCandidateCreated(drive, result.candidate)

@@ -70,7 +70,7 @@ export function publicRoutes() {
     let result
     try { result = await upsertFromSubmission({ drive, raw: event, source: 'google_forms' }) }
     catch (e) { await logIngest(drive.owner_id, drive.id, 'google_forms', { outcome: 'error', message: e.message }, event); throw e }
-    await logIngest(drive.owner_id, drive.id, 'google_forms', result, event)
+    if (result.outcome !== 'skipped') await logIngest(drive.owner_id, drive.id, 'google_forms', result, event)
     if (result.outcome === 'created') await afterCandidateCreated(drive, result.candidate)
     // 200 for duplicates and rejects keeps viaSocket from retrying a payload that can never succeed.
     res.status(result.outcome === 'created' ? 201 : 200).json({ outcome: result.outcome, message: result.message, candidate_id: result.candidate?.id })

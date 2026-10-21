@@ -3,7 +3,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { one, many, query } from '../db.js'
 import { slugify } from '../lib/normalize.js'
-import { upsertFromSubmission, logIngest, changeStage, STAGES } from '../lib/candidates.js'
+import { upsertFromSubmission, logIngest, changeStage, rememberDeletion, STAGES } from '../lib/candidates.js'
 import { dashboardMetrics, waitingList, pendingFeedbackList, registrationsTimeline, nowInterviewing, interviewerLoad } from '../lib/metrics.js'
 import { approveAndExecute, requestApproval, retry } from '../lib/approvals.js'
 import { interviewReminder, feedbackReminder } from '../lib/emails.js'
@@ -126,6 +126,7 @@ export function hrRoutes() {
     let deleted = 0
     for (const id of ids) {
       if (!(await one('select 1 from candidates where id = $1 and owner_id = $2', [id, ownerId]))) continue
+      await rememberDeletion(id, ownerId)
       await query(`delete from approvals where owner_id = $1 and candidate_id = $2 and status = 'pending'`, [ownerId, id])
       await query('delete from ingest_events where candidate_id = $1 and owner_id = $2', [id, ownerId])
       await query('delete from candidates where id = $1 and owner_id = $2', [id, ownerId]); deleted++

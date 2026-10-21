@@ -7,10 +7,17 @@ import { mapSubmission } from './mapper.js'
  * profile fields that are still empty. Stage, queue, interviewer and timestamps are HR-managed
  * and are never written here.
  */
-export async function upsertFromSubmission({ drive, raw, source }) {
+export async function upsertFromSubmission({ drive, raw, source, force = false }) {
   const { columns, extra, externalRef } = mapSubmission(raw, drive.field_map)
   if (!columns.full_name) return { outcome: 'rejected', message: 'No name found in the submission' }
   if (!columns.email_norm && !columns.phone_norm) return { outcome: 'rejected', message: 'Submission needs a valid email or phone number' }
+
+  // HR deleted the candidate made from this very response: do not bring it back (unless HR explicitly imports it).
+  if (externalRef) {
+    const gone = await one('select 1 from deleted_responses where drive_id = $1 and source = $2 and external_ref = $3', [drive.id, source, externalRef])
+    if (gone && !force) return { outcome: 'skipped', message: 'This response was deleted earlier' }
+    if (gone && force) await query('delete from deleted_responses where drive_id = $1 and source = $2 and external_ref = $3', [drive.id, source, externalRef])
+  }
 
   const existing = await findExisting(drive.id, columns, source, externalRef)
   if (existing) return { outcome: 'duplicate', candidate: await fillBlanks(existing, columns, extra), message: 'Already registered' }
@@ -101,3 +108,8 @@ export async function changeStage(ownerId, id, stage, { interviewerId, autoQueue
   const row = await one(`update candidates set ${sets.join(', ')} where id = $1 and owner_id = $2 returning *`, params)
   return { candidate: row, prev: c.stage }
 }
+
+/** Called as a candidate is deleted: remember which form response made them. */
+export const rememberDeletion = (candidateId, ownerId) => query(
+  `insert or ignore into deleted_responses (drive_id, source, external_ref)
+   select drive_id, source, external_ref from candidates where id = $1 and owner_id = $2 and external_ref is not null`, [candidateId, ownerId])
