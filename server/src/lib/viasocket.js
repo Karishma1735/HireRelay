@@ -34,7 +34,7 @@ export function embedToken(uniqueIdentifier) {
   return jwt.sign(
     { org_id: config.viasocket.orgId, project_id: config.viasocket.projectId, unique_identifier: String(uniqueIdentifier) },
     config.viasocket.secret,
-    { algorithm: 'HS256' }
+    { algorithm: 'HS256', noTimestamp: true }
   )
 }
 
