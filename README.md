@@ -18,7 +18,7 @@ HR approves ─► viaSocket runs Gmail "Send Email" on the user's script_id ─
 npm install
 npx supabase start            # local Supabase (needs Docker); `npx supabase db reset` applies supabase/migrations
 cp .env.example .env          # fill SUPABASE_*, DATABASE_URL from `npx supabase status`
-npm run dev                   # API :8787, web :5173
+npm run dev                   # API :8787, web :5173 (single root package.json)
 ```
 
 The app has a **Setup** screen (shown automatically when Supabase is missing; always at `/setup`) listing exactly which values are set. A feature that needs a missing value stays off and says why — nothing pretends to work.
@@ -40,6 +40,9 @@ The app has a **Setup** screen (shown automatically when Supabase is missing; al
 - **HR state is protected:** a duplicate submission may only fill *empty* profile fields. Stage, queue, interviewer and interview timestamps are written only by HR actions.
 - **Approvals:** emails are queued as `pending`; approve is atomic (once), executed through viaSocket, and every attempt is a `workflow_runs` row with the real response or error. Registration confirmations can be switched to auto-send (reminders always need approval).
 - **Secrets:** embed secret, `script_id`s and ingest keys never reach the browser. The browser receives an embed token only to open the Connect popup / prebuilt UI.
+
+## Deployed on Embarko
+Live at https://hirerelay.embarko.app (one Node process: `npm run build` builds the client, `npm start` serves API + UI). Non-secret viaSocket values, `INGEST_SECRET` and `HIRERELAY_PUBLIC_URL` are set as Embarko env vars. Still to add there: `VIASOCKET_EMBED_SECRET`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` (a hosted Supabase project — Embarko has no managed database). Until then the app shows its Setup screen.
 
 ## Tests
 `npm test` runs against a real Postgres (`TEST_DATABASE_URL`, default `postgresql://postgres@localhost:54399/hirerelay_test`; the schema is dropped and recreated). Only Supabase Auth is replaced, by an injected verifier. `npm run check:viasocket` validates every viaSocket id/URL in the code against the live catalog.
