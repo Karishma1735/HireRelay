@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 
 // One hue (blue) for ordered data, from the reference palette: the funnel uses ordinal steps
 // 250 -> 600 so the lightest bar still clears 2:1 on a white surface.
-export const BLUE = '#5B5BF0'
-export const RAMP = { 250: '#C7C7F8', 350: '#A5A5F5', 450: '#7B7BF2', 600: '#5B5BF0' }
+export const BLUE = '#2a78d6'
+export const RAMP = { 250: '#86b6ef', 350: '#5598e7', 450: '#2a78d6', 600: '#184f95' }
 
 /** Width of an element, tracked, so SVG text and dots keep their true size instead of stretching. */
 function useWidth() {

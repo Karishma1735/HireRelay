@@ -17,7 +17,7 @@ export default function DriveDetail() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div><Link to="/drives" className="text-xs text-brand-600">← All drives</Link><h1 className="text-2xl font-semibold">{d.name}</h1>
+        <div><Link to="/drives" className="text-xs text-indigo-600">← All drives</Link><h1 className="text-2xl font-semibold">{d.name}</h1>
           <p className="text-sm text-slate-500">{[d.role_title, d.venue, d.drive_date].filter(Boolean).join(' · ')}</p></div>
         <div className="flex gap-2"><Button variant="secondary" onClick={() => setAdding(true)}><Plus className="h-4 w-4" /> Add candidate</Button>
           <Button variant="secondary" onClick={() => status.mutate(d.status === 'active' ? 'closed' : 'active')}>{d.status === 'active' ? 'Close registration' : 'Reopen registration'}</Button></div>
@@ -58,7 +58,7 @@ function GoogleFormCard({ drive }) {
       {vs.isLoading ? <Spinner /> : !vs.data.configured ? (
         <Alert tone="warn">viaSocket is not configured yet (missing {vs.data.missing.join(', ')}). See <Link className="underline" to="/integrations">Integrations</Link>.</Alert>
       ) : !forms?.connected ? (
-        <p className="text-sm text-slate-600">Connect your Google account on <Link className="font-medium text-brand-600" to="/integrations">Integrations</Link> to sync a Google Form into this drive.</p>
+        <p className="text-sm text-slate-600">Connect your Google account on <Link className="font-medium text-indigo-600" to="/integrations">Integrations</Link> to sync a Google Form into this drive.</p>
       ) : sub ? (
         <div className="space-y-3 text-sm">
           <p className="text-slate-600">New responses appear here <b>automatically</b>. HireRelay checks your form every 30 seconds, and viaSocket also delivers them directly. Duplicates are ignored and interview status is never overwritten. Only a response sent <i>before</i> syncing started needs <b>Import latest response</b>.</p>

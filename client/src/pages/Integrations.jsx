@@ -118,11 +118,11 @@ function DriveForms() {
       <div className="text-xs font-medium text-slate-600">Which form feeds which hiring drive</div>
       {drives.isLoading || forms.isLoading ? <p className="text-sm text-slate-500">Loading your drives and forms…</p>
         : forms.isError ? <Alert>{forms.error.message}</Alert>
-        : !drives.data?.length ? <p className="text-sm text-slate-600">Create a hiring drive first, then pick its form here. <Link className="font-medium text-brand-600" to="/drives">Go to drives</Link></p>
+        : !drives.data?.length ? <p className="text-sm text-slate-600">Create a hiring drive first, then pick its form here. <Link className="font-medium text-indigo-600" to="/drives">Go to drives</Link></p>
         : !forms.data?.length ? <p className="text-sm text-slate-600">No Google Forms found in this Google account. Create a form in Google Forms, then reload this page.</p>
         : drives.data.map((d) => (
           <div key={d.id} className="space-y-1.5 rounded-lg border border-slate-200 p-2.5">
-            <div className="flex items-center justify-between gap-2 text-sm"><Link to={`/drives/${d.id}`} className="font-medium hover:text-brand-700">{d.name}</Link>
+            <div className="flex items-center justify-between gap-2 text-sm"><Link to={`/drives/${d.id}`} className="font-medium hover:text-indigo-700">{d.name}</Link>
               {d.google_form_connected && <Badge tone="green">Syncing</Badge>}</div>
             {d.google_form_connected ? <Button size="sm" variant="danger" loading={stop.isPending && stop.variables === d.id} onClick={() => stop.mutate(d.id)}>Stop syncing</Button> : (
               <div className="flex gap-2">

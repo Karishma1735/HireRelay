@@ -15,13 +15,13 @@ export default function Login() {
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
       <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center gap-2 text-xl font-bold text-brand-700"><Radio className="h-6 w-6" /> HireRelay</div>
+        <div className="flex items-center gap-2 text-xl font-bold text-indigo-700"><Radio className="h-6 w-6" /> HireRelay</div>
         <p className="text-sm text-slate-500">Walk-in hiring coordinator for HR teams.</p>
         <Field label="Email"><input className="input" type="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
         <Field label={mode === 'signup' ? 'Password (8+ characters)' : 'Password'}><input className="input" type="password" required minLength={8} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
         {error && <Alert>{error}</Alert>}
         <Button className="w-full" loading={busy}>{mode === 'signin' ? 'Sign in' : 'Create account'}</Button>
-        <button type="button" className="w-full text-center text-sm text-brand-600" onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')}>
+        <button type="button" className="w-full text-center text-sm text-indigo-600" onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')}>
           {mode === 'signin' ? 'New here? Create an account' : 'Have an account? Sign in'}
         </button>
       </form>
