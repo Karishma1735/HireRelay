@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { Search, Trash2, ChevronDown, ChevronRight, Paperclip, FileText, Download, Upload, X } from 'lucide-react'
 import { get, post, patch, del, upload, openProtectedFile } from '../lib/api.js'
 import { STAGE_LABEL } from '../lib/format.js'
-import { Alert, Button, Empty, Field, Modal, Spinner, StageBadge } from './ui.jsx'
+import { Alert, Button, Empty, Field, Modal, Spinner, StageBadge, Avatar } from './ui.jsx'
 
 // The 'Check in' label is swapped for 'Check in & queue' at render time when auto-queue is on.
 const NEXT = {
@@ -50,11 +50,11 @@ export default function CandidateTable({ driveId, interviewerId, initialPendingF
     </table>
   )
   const renderRow = (c) => (
-    <tr key={c.id} className={`hover:bg-slate-50 ${sel.has(c.id) ? 'bg-indigo-50/50' : ''}`}>
+    <tr key={c.id} className={`hover:bg-slate-50 ${sel.has(c.id) ? 'bg-brand-50/50' : ''}`}>
       <td className="px-3 py-2"><input type="checkbox" aria-label={`Select ${c.full_name}`} checked={sel.has(c.id)} onChange={() => toggle(c.id)} /></td>
       <td className="px-3 py-2 tabular-nums text-slate-400">{c.queue_number ?? ''}</td>
-      <td className="px-3 py-2"><button className="inline-flex items-center gap-1.5 text-left font-medium text-slate-900 hover:text-indigo-700" onClick={() => setOpen(c.id)}>{c.full_name}{c.has_cv && <Paperclip className="h-3.5 w-3.5 text-indigo-500" aria-label="Has a CV" />}</button>
-        <div className="text-xs text-slate-500">{[c.email, c.phone].filter(Boolean).join(' · ')}</div></td>
+      <td className="px-3 py-2"><div className="flex items-center gap-3"><Avatar name={c.full_name} /><div className="min-w-0"><button className="inline-flex items-center gap-1.5 text-left font-semibold text-slate-900 hover:text-brand-700" onClick={() => setOpen(c.id)}>{c.full_name}{c.has_cv && <Paperclip className="h-3.5 w-3.5 text-brand-500" aria-label="Has a CV" />}</button>
+        <div className="text-xs text-slate-500">{[c.email, c.phone].filter(Boolean).join(' · ')}</div></div></div></td>
       <td className="px-3 py-2"><StageBadge stage={c.stage} />{c.interview_completed_at && !c.has_feedback && <span className="ml-1 text-xs text-rose-600">feedback due</span>}</td>
       <td className="px-3 py-2">
         <select className="input !py-1 !text-xs" value={c.interviewer_id || ''} onChange={(e) => assign.mutate({ id: c.id, interviewer_id: e.target.value })} aria-label="Interviewer">
@@ -101,7 +101,7 @@ export default function CandidateTable({ driveId, interviewerId, initialPendingF
                   <button className="rounded p-0.5 hover:bg-slate-200" aria-label={shut ? `Expand ${g.name}` : `Collapse ${g.name}`} aria-expanded={!shut} onClick={() => setCollapsed((c) => { const n = new Set(c); n.has(g.id) ? n.delete(g.id) : n.add(g.id); return n })}>
                     {shut ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button>
                   <input type="checkbox" aria-label={`Select all in ${g.name}`} checked={all} onChange={() => setSel((s) => { const n = new Set(s); ids.forEach((id) => (all ? n.delete(id) : n.add(id))); return n })} />
-                  <Link to={`/drives/${g.id}`} className="font-semibold text-slate-900 hover:text-indigo-700">{g.name}</Link>
+                  <Link to={`/drives/${g.id}`} className="font-semibold text-slate-900 hover:text-brand-700">{g.name}</Link>
                   <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200">{g.rows.length} candidate{g.rows.length > 1 ? 's' : ''}</span>
                   <span className="text-xs text-slate-500">{stats.map(([n, l]) => `${n} ${l}`).join(' · ')}</span>
                   {g.date && <span className="ml-auto text-xs text-slate-400">{g.date}</span>}
@@ -167,7 +167,7 @@ function CvSection({ id, cv }) {
       <h4 className="mb-2 font-semibold">CV</h4>
       {cv ? (
         <div className="flex flex-wrap items-center gap-3 rounded-lg bg-slate-50 p-3">
-          <FileText className="h-5 w-5 shrink-0 text-indigo-600" />
+          <FileText className="h-5 w-5 shrink-0 text-brand-600" />
           <div className="min-w-0 flex-1"><div className="truncate font-medium">{cv.name}</div><div className="text-xs text-slate-500">{Math.max(1, Math.round(cv.size / 1024))} KB · added {new Date(cv.uploaded_at).toLocaleDateString()}</div></div>
           <Button size="sm" variant="secondary" loading={busy} onClick={open}>{cv.mime === 'application/pdf' ? 'Open' : <><Download className="h-3.5 w-3.5" /> Download</>}</Button>
           <label className="cursor-pointer rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"><Upload className="mr-1 inline h-3.5 w-3.5" />Replace<input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={choose} /></label>
@@ -176,7 +176,7 @@ function CvSection({ id, cv }) {
       ) : (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-slate-300 p-3 text-slate-500">
           <span>No CV yet.</span>
-          <label className="cursor-pointer rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"><Upload className="mr-1 inline h-3.5 w-3.5" />Upload CV<input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={choose} /></label>
+          <label className="cursor-pointer rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"><Upload className="mr-1 inline h-3.5 w-3.5" />Upload CV<input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={choose} /></label>
         </div>)}
       <p className="mt-1.5 text-xs text-slate-400">PDF, DOC or DOCX, up to 5 MB. Interviewers receive it by email when assigned.</p>
       {error && <div className="mt-2"><Alert>{error}</Alert></div>}

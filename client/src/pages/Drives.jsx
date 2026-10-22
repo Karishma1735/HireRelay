@@ -19,7 +19,7 @@ export default function Drives() {
       <div className="flex items-center justify-between"><div><h1 className="text-2xl font-semibold">Hiring drives</h1><p className="text-sm text-slate-500">Each drive gets its own shareable registration form.</p></div><Button onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> New drive</Button></div>
       {!list.data?.length ? <Card><Empty>No drives yet. Create one to start collecting candidates.</Empty></Card> : (
         <div className="grid gap-3 md:grid-cols-2">{list.data.map((d) => (
-          <Link key={d.id} to={`/drives/${d.id}`} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-indigo-300">
+          <Link key={d.id} to={`/drives/${d.id}`} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-brand-300">
             <div className="flex items-start justify-between gap-2"><h3 className="font-semibold">{d.name}</h3><Badge tone={d.status === 'active' ? 'green' : 'slate'}>{d.status}</Badge></div>
             <p className="mt-0.5 text-sm text-slate-500">{[d.role_title, d.venue, d.drive_date].filter(Boolean).join(' · ') || 'No details yet'}</p>
             <div className="mt-3 flex gap-4 text-sm"><span><b className="tabular-nums">{d.candidate_count}</b> candidates</span><span><b className="tabular-nums">{d.checked_in_count}</b> checked in</span>{d.google_form_connected && <Badge tone="indigo">Google Form synced</Badge>}</div>

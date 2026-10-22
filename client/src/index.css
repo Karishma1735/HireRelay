@@ -2,7 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Soft aurora behind every page, fixed so it does not scroll with long lists. */
+body::before { content: ''; position: fixed; inset: 0 0 auto 0; height: 360px; z-index: -1; pointer-events: none;
+  background: radial-gradient(60% 100% at 20% 0%, rgba(155,107,255,.20), transparent), radial-gradient(50% 100% at 85% 0%, rgba(20,184,166,.16), transparent), radial-gradient(40% 100% at 55% 0%, rgba(91,91,240,.14), transparent); }
+
 @layer components {
-  .input { @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:bg-slate-100; }
+  .input { @apply w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:bg-slate-100; }
   .label { @apply mb-1 block text-xs font-medium text-slate-600; }
 }

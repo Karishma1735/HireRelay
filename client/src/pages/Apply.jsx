@@ -35,7 +35,7 @@ export default function Apply() {
   const d = drive.data
   return (
     <div className="mx-auto max-w-lg p-4 sm:py-10">
-      <div className="mb-4 flex items-center gap-2 font-bold text-indigo-700"><Radio className="h-5 w-5" /> HireRelay</div>
+      <div className="mb-4 flex items-center gap-2 font-bold text-brand-700"><Radio className="h-5 w-5" /> HireRelay</div>
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
         <h1 className="text-xl font-semibold">{d.name}</h1>
         <p className="mb-4 mt-1 text-sm text-slate-500">{[d.role_title, d.venue, d.drive_date].filter(Boolean).join(' · ')}</p>
@@ -55,7 +55,7 @@ export default function Apply() {
               <Field label="Current company"><input className="input" value={f.current_company} onChange={set('current_company')} /></Field>
             </div>
             <Field label="Upload your CV (optional)">
-              <input className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-indigo-700 hover:file:bg-indigo-100" type="file" accept=".pdf,.doc,.docx,application/pdf" onChange={pickCv} />
+              <input className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-brand-700 hover:file:bg-brand-100" type="file" accept=".pdf,.doc,.docx,application/pdf" onChange={pickCv} />
             </Field>
             <p className="-mt-1 text-xs text-slate-500">PDF, DOC or DOCX, up to 5 MB. {cv && <b className="text-slate-700">{cv.name} ({Math.max(1, Math.round(cv.size / 1024))} KB)</b>}</p>
             {cvError && <Alert>{cvError}</Alert>}
