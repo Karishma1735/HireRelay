@@ -64,3 +64,28 @@ export function interviewerAssigned(c, drive, interviewer, changed) {
       'Regards,<br>The hiring team'])
   }
 }
+
+const ROW_SKIP = new Set(['responseid', 'createtime', 'lastsubmittedtime'])
+const cell = (v, max = 300) => esc(String(v ?? '').slice(0, max))
+
+/** Everything an interviewer needs before meeting a candidate. All text is escaped: form answers come from the public. */
+export function interviewerBriefing(c, drive, interviewer, { cv } = {}) {
+  const facts = [
+    ['Role applied for', c.role_applied], ['Experience', c.experience_years != null ? `${c.experience_years} years` : null], ['Current company', c.current_company],
+    ['Email', c.email], ['Phone', c.phone], ['Drive', drive.name], ['Venue', drive.venue], ['Queue number', c.queue_number ? `#${c.queue_number}` : null]
+  ].filter(([, v]) => v)
+  const answers = Object.entries(c.extra || {}).filter(([k, v]) => v && !ROW_SKIP.has(k.toLowerCase())).slice(0, 25)
+  const table = (rows) => `<table cellpadding="6" style="border-collapse:collapse;font-size:14px">${rows.map(([k, v]) => `<tr><td style="color:#57534e;vertical-align:top;border-bottom:1px solid #e7e5e4"><b>${esc(String(k).replace(/_/g, ' '))}</b></td><td style="border-bottom:1px solid #e7e5e4">${cell(v)}</td></tr>`).join('')}</table>`
+  return {
+    purpose: 'custom', to: interviewer.email,
+    subject: `New candidate for you: ${c.full_name}${c.role_applied ? ` (${c.role_applied})` : ''}`,
+    attachments: cv ? [{ file_id: cv.id, name: cv.original_name }] : [],
+    body: wrap([
+      `Hi ${esc(interviewer.name)},`,
+      `<b>${esc(c.full_name)}</b> has been assigned to you for <b>${esc(drive.name)}</b>. Here is what we know:`,
+      table(facts),
+      answers.length ? `<b>Their answers on the registration form</b>${table(answers)}` : '',
+      cv ? `Their CV is attached: <b>${esc(cv.original_name)}</b>.` : 'They did not upload a CV.',
+      'Regards,<br>The hiring team'].filter(Boolean))
+  }
+}

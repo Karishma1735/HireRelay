@@ -4,17 +4,29 @@ import { useQuery } from '@tanstack/react-query'
 import { Radio, CheckCircle2 } from 'lucide-react'
 import { Alert, Button, Field, Spinner } from '../components/ui.jsx'
 
+const MAX_CV = 5 * 1024 * 1024
+
 /** Public candidate registration form: no sign-in, shareable by HR. */
 export default function Apply() {
   const { slug } = useParams()
   const drive = useQuery({ queryKey: ['public-drive', slug], queryFn: async () => { const r = await fetch(`/api/public/drives/${slug}`); const j = await r.json(); if (!r.ok) throw new Error(j.error); return j }, retry: false })
   const [f, setF] = useState({ full_name: '', email: '', phone: '', role_applied: '', experience_years: '', current_company: '', website: '' })
   const [state, setState] = useState({ busy: false, error: '', done: false })
+  const [cv, setCv] = useState(null); const [cvError, setCvError] = useState('')
+  const pickCv = (e) => {
+    const file = e.target.files?.[0]; setCvError(''); setCv(null); if (!file) return
+    if (!/\.(pdf|docx?)$/i.test(file.name)) return setCvError('Please choose a PDF, DOC or DOCX file.')
+    if (file.size > MAX_CV) return setCvError('That file is larger than 5 MB.')
+    setCv(file)
+  }
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value })
   async function submit(e) {
     e.preventDefault(); setState({ busy: true, error: '', done: false })
     const body = Object.fromEntries(Object.entries(f).filter(([, v]) => v !== ''))
-    const r = await fetch(`/api/public/drives/${slug}/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    // With a CV the request is multipart; without one it stays plain JSON.
+    let init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+    if (cv) { const fd = new FormData(); Object.entries(body).forEach(([k, v]) => fd.append(k, v)); fd.append('cv', cv); init = { method: 'POST', body: fd } }
+    const r = await fetch(`/api/public/drives/${slug}/register`, init)
     const j = await r.json().catch(() => ({}))
     setState(r.ok ? { busy: false, error: '', done: true } : { busy: false, error: j.details?.join('. ') || j.error || 'Could not submit', done: false })
   }
@@ -42,9 +54,15 @@ export default function Apply() {
               <Field label="Years of experience"><input className="input" type="number" min="0" max="60" step="0.5" value={f.experience_years} onChange={set('experience_years')} /></Field>
               <Field label="Current company"><input className="input" value={f.current_company} onChange={set('current_company')} /></Field>
             </div>
+            <Field label="Upload your CV (optional)">
+              <input className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-indigo-700 hover:file:bg-indigo-100" type="file" accept=".pdf,.doc,.docx,application/pdf" onChange={pickCv} />
+            </Field>
+            <p className="-mt-1 text-xs text-slate-500">PDF, DOC or DOCX, up to 5 MB. {cv && <b className="text-slate-700">{cv.name} ({Math.max(1, Math.round(cv.size / 1024))} KB)</b>}</p>
+            {cvError && <Alert>{cvError}</Alert>}
             <input className="hidden" tabIndex={-1} autoComplete="off" aria-hidden="true" value={f.website} onChange={set('website')} name="website" />
             {state.error && <Alert>{state.error}</Alert>}
-            <Button className="w-full" loading={state.busy}>Register</Button>
+            <p className="text-xs text-slate-500">Your details{cv ? ' and CV' : ''} are shared only with the hiring team and the interviewer assigned to you.</p>
+            <Button className="w-full" loading={state.busy} disabled={!!cvError}>{state.busy && cv ? 'Uploading…' : 'Register'}</Button>
           </form>
         )}
       </div>

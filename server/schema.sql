@@ -148,6 +148,21 @@ create table if not exists ingest_events (
 );
 create index if not exists ingest_events_owner_idx on ingest_events(owner_id, created_at desc);
 
+-- Candidate documents (CVs). The bytes live on disk under DATA_DIR/cvs; this row says whose they are.
+create table if not exists candidate_files (
+  id text primary key default (gen_uuid()),
+  owner_id text not null references users(id) on delete cascade,
+  candidate_id text not null references candidates(id) on delete cascade,
+  kind text not null default 'cv' check (kind in ('cv')),
+  original_name text not null,
+  mime text not null,
+  size integer not null,
+  storage_name text not null,
+  source text not null default 'upload',
+  created_at text not null default (now())
+);
+create unique index if not exists candidate_files_one_cv on candidate_files(candidate_id, kind);
+
 -- Responses whose candidate HR deleted. A form keeps returning old responses, so without this they would be re-added.
 create table if not exists deleted_responses (
   drive_id text not null references drives(id) on delete cascade,
@@ -162,6 +177,7 @@ create table if not exists settings (
   auto_send_confirmations integer not null default 0,
   auto_queue_on_check_in integer not null default 1,
   auto_send_queue_emails integer not null default 1,
-  auto_send_assignment_emails integer not null default 1
+  auto_send_assignment_emails integer not null default 1,
+  auto_send_interviewer_briefing integer not null default 1
 );
 

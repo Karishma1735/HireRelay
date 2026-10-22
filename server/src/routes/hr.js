@@ -9,6 +9,8 @@ import { approveAndExecute, requestApproval, retry } from '../lib/approvals.js'
 import { interviewReminder, feedbackReminder } from '../lib/emails.js'
 import { afterCandidateCreated } from './public.js'
 import { getSettings } from '../lib/settings.js'
+import { cvOf, saveCv, removeCv, readMultipart, detectType, CV_TYPE_MESSAGE } from '../lib/files.js'
+import { sendFile } from './files.js'
 import { notifyQueued, notifyAssigned } from '../lib/queue.js'
 
 const uuid = z.string().uuid()
@@ -90,7 +92,8 @@ export function hrRoutes() {
   r.get('/candidates', async (req, res) => {
     const q = z.object({ drive_id: uuid.optional(), interviewer_id: uuid.optional(), stage: z.enum(STAGES).optional(), q: z.string().max(100).optional(), pending_feedback: z.enum(['1']).optional(), limit: z.coerce.number().int().min(1).max(500).default(200) }).parse(req.query)
     res.json(await many(
-      `select c.*, d.name as drive_name, i.name as interviewer_name, (f.id is not null) as has_feedback
+      `select c.*, d.name as drive_name, i.name as interviewer_name, (f.id is not null) as has_feedback,
+         exists (select 1 from candidate_files cf where cf.candidate_id = c.id) as has_cv
        from candidates c join drives d on d.id = c.drive_id
        left join interviewers i on i.id = c.interviewer_id left join feedback f on f.candidate_id = c.id
        where c.owner_id = $1 and ($2 is null or c.drive_id = $2) and ($3 is null or c.stage = $3) and ($7 is null or c.interviewer_id = $7)
@@ -105,7 +108,8 @@ export function hrRoutes() {
       `select c.*, d.name as drive_name, i.name as interviewer_name from candidates c join drives d on d.id = c.drive_id
        left join interviewers i on i.id = c.interviewer_id where c.id = $1 and c.owner_id = $2`, [uuid.parse(req.params.id), owner(req)])
     if (!c) return res.status(404).json({ error: 'Candidate not found' })
-    res.json({ ...c, feedback: await one('select * from feedback where candidate_id = $1', [c.id]) })
+    const cv = await cvOf(c.id, owner(req))
+    res.json({ ...c, feedback: await one('select * from feedback where candidate_id = $1', [c.id]), cv: cv && { name: cv.original_name, size: cv.size, mime: cv.mime, uploaded_at: cv.created_at, source: cv.source } })
   })
 
   r.post('/candidates', async (req, res) => {
@@ -127,6 +131,7 @@ export function hrRoutes() {
     for (const id of ids) {
       if (!(await one('select 1 from candidates where id = $1 and owner_id = $2', [id, ownerId]))) continue
       await rememberDeletion(id, ownerId)
+      await removeCv(id, ownerId)
       await query(`delete from approvals where owner_id = $1 and candidate_id = $2 and status = 'pending'`, [ownerId, id])
       await query('delete from ingest_events where candidate_id = $1 and owner_id = $2', [id, ownerId])
       await query('delete from candidates where id = $1 and owner_id = $2', [id, ownerId]); deleted++
@@ -140,6 +145,23 @@ export function hrRoutes() {
   r.post('/candidates/delete', async (req, res) => {
     const { ids } = z.object({ ids: z.array(uuid).min(1).max(500) }).parse(req.body)
     res.json({ deleted: await deleteCandidates(owner(req), ids) })
+  })
+
+  // ---------- CV ----------
+  r.get('/candidates/:id/cv', async (req, res) => {
+    const f = await cvOf(uuid.parse(req.params.id), owner(req))
+    f ? sendFile(res, f) : res.status(404).json({ error: 'This candidate has no CV' })
+  })
+  r.post('/candidates/:id/cv', async (req, res) => {
+    const id = uuid.parse(req.params.id)
+    if (!(await one('select 1 from candidates where id = $1 and owner_id = $2', [id, owner(req)]))) return res.status(404).json({ error: 'Candidate not found' })
+    const { file } = await readMultipart(req)
+    if (!file || !detectType(file.buffer)) return res.status(422).json({ error: CV_TYPE_MESSAGE })
+    const saved = await saveCv(owner(req), id, file)
+    res.status(201).json({ name: saved.original_name, size: saved.size })
+  })
+  r.delete('/candidates/:id/cv', async (req, res) => {
+    (await removeCv(uuid.parse(req.params.id), owner(req))) ? res.json({ ok: true }) : res.status(404).json({ error: 'This candidate has no CV' })
   })
 
   r.post('/candidates/:id/stage', async (req, res) => {
@@ -255,12 +277,12 @@ export function hrRoutes() {
   // ---------- settings ----------
   r.get('/settings', async (req, res) => res.json(await getSettings(owner(req))))
   r.put('/settings', async (req, res) => {
-    const b = z.object({ auto_send_confirmations: z.boolean().optional(), auto_queue_on_check_in: z.boolean().optional(), auto_send_queue_emails: z.boolean().optional(), auto_send_assignment_emails: z.boolean().optional() }).parse(req.body)
+    const b = z.object({ auto_send_confirmations: z.boolean().optional(), auto_queue_on_check_in: z.boolean().optional(), auto_send_queue_emails: z.boolean().optional(), auto_send_assignment_emails: z.boolean().optional(), auto_send_interviewer_briefing: z.boolean().optional() }).parse(req.body)
     const cur = { ...(await getSettings(owner(req))), ...b }
     await query(
-      `insert into settings (owner_id, auto_send_confirmations, auto_queue_on_check_in, auto_send_queue_emails, auto_send_assignment_emails) values ($1,$2,$3,$4,$5)
-       on conflict (owner_id) do update set auto_send_confirmations = $2, auto_queue_on_check_in = $3, auto_send_queue_emails = $4, auto_send_assignment_emails = $5`,
-      [owner(req), cur.auto_send_confirmations, cur.auto_queue_on_check_in, cur.auto_send_queue_emails, cur.auto_send_assignment_emails])
+      `insert into settings (owner_id, auto_send_confirmations, auto_queue_on_check_in, auto_send_queue_emails, auto_send_assignment_emails, auto_send_interviewer_briefing) values ($1,$2,$3,$4,$5,$6)
+       on conflict (owner_id) do update set auto_send_confirmations = $2, auto_queue_on_check_in = $3, auto_send_queue_emails = $4, auto_send_assignment_emails = $5, auto_send_interviewer_briefing = $6`,
+      [owner(req), cur.auto_send_confirmations, cur.auto_queue_on_check_in, cur.auto_send_queue_emails, cur.auto_send_assignment_emails, cur.auto_send_interviewer_briefing])
     res.json(cur)
   })
   return r

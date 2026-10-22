@@ -34,6 +34,7 @@ export default function Approvals() {
           <div className="flex flex-col gap-1.5 text-sm text-slate-600">
             {[['auto_queue_on_check_in', 'Add to queue automatically on check-in', 'Checking someone in puts them straight into the queue and gives them a queue number.'],
               ['auto_send_queue_emails', 'Auto-send the queue-number email', 'The candidate is emailed their queue number the moment they join the queue, without waiting for approval.'],
+              ['auto_send_interviewer_briefing', 'Auto-send the candidate briefing (with CV) to the interviewer', 'When you assign an interviewer, they are emailed the candidate\'s details, form answers and CV without waiting for approval.'],
               ['auto_send_assignment_emails', 'Auto-send an email when an interviewer is assigned', 'The candidate is told who will interview them as soon as you assign or change the interviewer.'],
               ['auto_send_confirmations', 'Auto-send registration confirmations', 'Registration confirmations are sent without waiting for approval. Reminders always need approval.']].map(([k, label, hint]) => (
               <label key={k} className="flex items-center gap-2" title={hint}><input type="checkbox" checked={!!(pending[k] ?? settings.data?.[k])} disabled={!settings.data} onChange={(e) => { setPending((p) => ({ ...p, [k]: e.target.checked })); auto.mutate({ [k]: e.target.checked }) }} /> {label}</label>))}
@@ -59,7 +60,7 @@ export default function Approvals() {
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0"><button className="text-left font-medium hover:text-indigo-700" onClick={() => setOpen(open === a.id ? null : a.id)}>{a.title}</button>
                   <div className="text-xs text-slate-500">To {a.payload.to || 'no address'} · requested by {a.requested_by} · {ago(a.created_at)}</div>
-                  {a.reason && <div className="mt-1 text-xs text-slate-600">Why: {a.reason}</div>}{a.error && <div className="mt-1 text-xs text-rose-600">{a.error}</div>}</div>
+                  {a.payload.attachments?.length > 0 && <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700">📎 {a.payload.attachments.map((x) => x.name).join(', ')}</div>}{a.reason && <div className="mt-1 text-xs text-slate-600">Why: {a.reason}</div>}{a.error && <div className="mt-1 text-xs text-rose-600">{a.error}</div>}</div>
                 <div className="flex items-center gap-2"><Badge tone={TONE[a.status]}>{a.status}</Badge>
                   {(a.status === 'failed' || a.status === 'executed') && <Button size="sm" variant="secondary" loading={act.isPending && act.variables?.id === a.id && act.variables.what === 'retry'} onClick={() => act.mutate({ id: a.id, what: 'retry' })}>{a.status === 'failed' ? 'Retry' : 'Send again'}</Button>}
                   {a.status === 'pending' && <><Button size="sm" loading={act.isPending && act.variables?.id === a.id && act.variables.what === 'approve'} onClick={() => act.mutate({ id: a.id, what: 'approve' })}>Approve & send</Button>

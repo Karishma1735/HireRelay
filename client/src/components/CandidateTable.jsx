@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Search, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
-import { get, post, patch, del } from '../lib/api.js'
+import { Search, Trash2, ChevronDown, ChevronRight, Paperclip, FileText, Download, Upload, X } from 'lucide-react'
+import { get, post, patch, del, upload, openProtectedFile } from '../lib/api.js'
 import { STAGE_LABEL } from '../lib/format.js'
 import { Alert, Button, Empty, Field, Modal, Spinner, StageBadge } from './ui.jsx'
 
@@ -53,7 +53,7 @@ export default function CandidateTable({ driveId, interviewerId, initialPendingF
     <tr key={c.id} className={`hover:bg-slate-50 ${sel.has(c.id) ? 'bg-indigo-50/50' : ''}`}>
       <td className="px-3 py-2"><input type="checkbox" aria-label={`Select ${c.full_name}`} checked={sel.has(c.id)} onChange={() => toggle(c.id)} /></td>
       <td className="px-3 py-2 tabular-nums text-slate-400">{c.queue_number ?? ''}</td>
-      <td className="px-3 py-2"><button className="text-left font-medium text-slate-900 hover:text-indigo-700" onClick={() => setOpen(c.id)}>{c.full_name}</button>
+      <td className="px-3 py-2"><button className="inline-flex items-center gap-1.5 text-left font-medium text-slate-900 hover:text-indigo-700" onClick={() => setOpen(c.id)}>{c.full_name}{c.has_cv && <Paperclip className="h-3.5 w-3.5 text-indigo-500" aria-label="Has a CV" />}</button>
         <div className="text-xs text-slate-500">{[c.email, c.phone].filter(Boolean).join(' · ')}</div></td>
       <td className="px-3 py-2"><StageBadge stage={c.stage} />{c.interview_completed_at && !c.has_feedback && <span className="ml-1 text-xs text-rose-600">feedback due</span>}</td>
       <td className="px-3 py-2">
@@ -131,6 +131,7 @@ function CandidateModal({ id, onClose }) {
         </dl>
         {Object.keys(d.extra || {}).length > 0 && <details className="rounded-lg bg-slate-50 p-3"><summary className="cursor-pointer text-xs font-medium text-slate-600">All form answers</summary>
           <dl className="mt-2 space-y-1">{Object.entries(d.extra).map(([k, v]) => <div key={k}><dt className="text-xs text-slate-500">{k.replace(/_/g, ' ')}</dt><dd>{v || '—'}</dd></div>)}</dl></details>}
+        <CvSection id={id} cv={d.cv} />
         <div className="border-t pt-4">
           <h4 className="mb-2 font-semibold">Interview feedback</h4>
           {d.feedback ? (<div className="rounded-lg bg-emerald-50 p-3"><div>Rating <b>{d.feedback.rating}/5</b> · <b className="capitalize">{d.feedback.recommendation}</b></div>{d.feedback.notes && <p className="mt-1 text-slate-700">{d.feedback.notes}</p>}</div>)
@@ -145,5 +146,39 @@ function CandidateModal({ id, onClose }) {
         </div>
       </div>)}
     </Modal>
+  )
+}
+
+
+function CvSection({ id, cv }) {
+  const qc = useQueryClient(); const [error, setError] = useState(''); const [busy, setBusy] = useState(false)
+  const changed = () => { qc.invalidateQueries({ queryKey: ['candidate', id] }); qc.invalidateQueries({ queryKey: ['candidates'] }) }
+  const run = (fn) => async (...a) => { setBusy(true); setError(''); try { await fn(...a) } catch (e) { setError(e.message) } finally { setBusy(false) } }
+  const choose = run(async (e) => {
+    const file = e.target.files?.[0]; e.target.value = ''; if (!file) return
+    if (file.size > 5 * 1024 * 1024) throw new Error('That file is larger than 5 MB.')
+    const fd = new FormData(); fd.append('cv', file); await upload(`/candidates/${id}/cv`, fd); changed()
+  })
+  const remove = run(async () => { if (confirm('Remove this CV?')) { await del(`/candidates/${id}/cv`); changed() } })
+  const open = run(() => openProtectedFile(`/candidates/${id}/cv`, cv.name, cv.mime))
+  return (
+    <div className="border-t pt-4">
+      <h4 className="mb-2 font-semibold">CV</h4>
+      {cv ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-slate-50 p-3">
+          <FileText className="h-5 w-5 shrink-0 text-indigo-600" />
+          <div className="min-w-0 flex-1"><div className="truncate font-medium">{cv.name}</div><div className="text-xs text-slate-500">{Math.max(1, Math.round(cv.size / 1024))} KB · added {new Date(cv.uploaded_at).toLocaleDateString()}</div></div>
+          <Button size="sm" variant="secondary" loading={busy} onClick={open}>{cv.mime === 'application/pdf' ? 'Open' : <><Download className="h-3.5 w-3.5" /> Download</>}</Button>
+          <label className="cursor-pointer rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"><Upload className="mr-1 inline h-3.5 w-3.5" />Replace<input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={choose} /></label>
+          <button className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Remove CV" onClick={remove}><X className="h-4 w-4" /></button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-slate-300 p-3 text-slate-500">
+          <span>No CV yet.</span>
+          <label className="cursor-pointer rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"><Upload className="mr-1 inline h-3.5 w-3.5" />Upload CV<input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={choose} /></label>
+        </div>)}
+      <p className="mt-1.5 text-xs text-slate-400">PDF, DOC or DOCX, up to 5 MB. Interviewers receive it by email when assigned.</p>
+      {error && <div className="mt-2"><Alert>{error}</Alert></div>}
+    </div>
   )
 }

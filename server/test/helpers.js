@@ -7,6 +7,7 @@ import { closeDb } from '../src/db.js'
 process.env.DB_MEMORY = '1'
 process.env.DATA_DIR = path.join(os.tmpdir(), `hirerelay-test-${process.pid}`)
 process.env.INGEST_SECRET = 'test-ingest-secret'
+process.env.REGISTER_RATE_LIMIT = '100000' // every test comes from one address; production keeps the default of 20 a minute
 process.env.VIASOCKET_ORG_ID = '80251'
 process.env.VIASOCKET_PROJECT_ID = 'proj1pVRqxu9'
 process.env.VIASOCKET_API_URL = 'https://flow-api.viasocket.com'

@@ -8,6 +8,7 @@ import { upsertFromSubmission, logIngest } from '../lib/candidates.js'
 import { registrationConfirmation } from '../lib/emails.js'
 import { requestApproval, approveAndExecute } from '../lib/approvals.js'
 import { getSettings } from '../lib/settings.js'
+import { readMultipart, detectType, saveCv, cvOf, CV_TYPE_MESSAGE } from '../lib/files.js'
 
 /** After a brand-new candidate: queue the confirmation email (or send it when HR enabled auto-send). */
 export async function afterCandidateCreated(drive, candidate) {
@@ -32,7 +33,7 @@ const registerSchema = z.object({
 
 export function publicRoutes() {
   const r = Router()
-  const limiter = rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: true, legacyHeaders: false })
+  const limiter = rateLimit({ windowMs: 60_000, limit: Number(process.env.REGISTER_RATE_LIMIT) || 20, standardHeaders: true, legacyHeaders: false }) // per address, per minute
 
   r.get('/health', (_req, res) => res.json({ ok: true }))
 
@@ -50,12 +51,21 @@ export function publicRoutes() {
   r.post('/public/drives/:slug/register', limiter, async (req, res) => {
     const drive = await one(`select * from drives where slug = $1 and status = 'active'`, [req.params.slug])
     if (!drive) return res.status(404).json({ error: 'This registration form is closed or does not exist' })
-    const body = registerSchema.parse(req.body)
+    let input = req.body; let cv = null
+    if (req.is('multipart/form-data')) {
+      const { fields, file } = await readMultipart(req)
+      input = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== '')); cv = file
+    }
+    const body = registerSchema.parse(input)
     if (body.website) return res.json({ outcome: 'created' }) // silently drop bots
+    // Refuse a bad file before anything is created, so the candidate can fix it and try again.
+    if (cv && !detectType(cv.buffer)) return res.status(422).json({ error: CV_TYPE_MESSAGE })
     const { website, ...raw } = body
     const result = await upsertFromSubmission({ drive, raw, source: 'form' })
     await logIngest(drive.owner_id, drive.id, 'form', result, raw)
     if (result.outcome === 'rejected') return res.status(422).json({ error: result.message })
+    // A CV is only attached to a candidate who has none, so someone re-submitting with another person's email cannot replace their CV.
+    if (cv && result.candidate && !(await cvOf(result.candidate.id, drive.owner_id))) await saveCv(drive.owner_id, result.candidate.id, cv)
     if (result.outcome === 'created') await afterCandidateCreated(drive, result.candidate)
     // Never reveal whether someone else already registered with these details.
     res.status(result.outcome === 'created' ? 201 : 200).json({ outcome: result.outcome === 'created' ? 'created' : 'already_registered' })

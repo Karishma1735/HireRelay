@@ -27,6 +27,9 @@ export async function localVerifier(token) {
   } catch { return null }
 }
 
+/** HMAC of `purpose:value` with the server secret: for links that must be unguessable and unforgeable. */
+export const signValue = (purpose, value) => crypto.createHmac('sha256', sessionSecret()).update(`${purpose}:${value}`).digest('base64url')
+
 // Agent lookup tokens: short-lived, one user, read-only, and signed with a DIFFERENT key than login sessions,
 // so a leaked tool token can never be used to sign in and a session token is never accepted by the tool routes.
 const toolKey = () => `${sessionSecret()}:agent-tools`

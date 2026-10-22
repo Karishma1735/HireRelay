@@ -1,5 +1,6 @@
 import { one, query } from '../db.js'
-import { config } from '../config.js'
+import { config, isPublicUrl } from '../config.js'
+import { cvLinkUrl } from './files.js'
 import * as vs from './viasocket.js'
 
 /** Queues an email for HR approval. Nothing is sent until an HR user approves it. */
@@ -7,7 +8,7 @@ export async function requestApproval(ownerId, { email, candidateId = null, requ
   return one(
     `insert into approvals (owner_id, kind, purpose, title, reason, payload, candidate_id, requested_by)
      values ($1,'send_email',$2,$3,$4,$5,$6,$7) returning *`,
-    [ownerId, email.purpose, title, reason, { to: email.to, subject: email.subject, body: email.body }, candidateId, requestedBy])
+    [ownerId, email.purpose, title, reason, { to: email.to, subject: email.subject, body: email.body, ...(email.attachments?.length ? { attachments: email.attachments } : {}) }, candidateId, requestedBy])
 }
 
 /** The app's own error hidden inside a 200 envelope, or a missing Gmail message id; null when the send is proven. */
@@ -44,8 +45,22 @@ export async function execute(ownerId, approval) {
     const conn = await one(`select * from viasocket_connections where owner_id = $1 and service_id = $2`, [ownerId, config.viasocket.gmail.serviceId])
     if (!conn?.script_id) throw new Error('Gmail is not connected. Connect it on the Integrations page.')
     if (!conn.config?.from) throw new Error('Choose the Gmail sender address on the Integrations page first.')
+    // Files are attached by giving Gmail a short-lived link to fetch. The link is made now, at send time, so it cannot
+    // have expired while the email waited for approval.
+    let attachments
+    if (approval.payload.attachments?.length) {
+      if (!isPublicUrl(config.publicUrl)) throw new Error('Cannot attach the CV: HIRERELAY_PUBLIC_URL must be a public address so the email service can fetch the file.')
+      const urls = []
+      for (const a of approval.payload.attachments) {
+        const f = await one('select * from candidate_files where id = $1 and owner_id = $2', [a.file_id, ownerId])
+        if (!f) throw new Error('The CV file is no longer available (the candidate or file was deleted).')
+        urls.push(cvLinkUrl(f, 3600))
+      }
+      attachments = urls.join(',')
+    }
     const response = await vs.runAction(conn.script_id, config.viasocket.gmail.sendActionVersionId, {
-      to: approval.payload.to, subject: approval.payload.subject, messageBody: approval.payload.body, from: conn.config.from
+      to: approval.payload.to, subject: approval.payload.subject, messageBody: approval.payload.body, from: conn.config.from,
+      ...(attachments ? { attachments } : {})
     })
     // viaSocket answers 200 even when the app itself failed, so success needs proof: Gmail returns the sent message's id.
     const failure = appFailure(response)

@@ -410,7 +410,8 @@ test('assigning an interviewer emails the candidate (once per real change), and 
   // No email address, or an interview already finished: no email.
   const noMail = (await t.a('POST', '/api/candidates', { drive_id: drive.id, full_name: 'No Mail Person', phone: '9222222222' })).body
   await t.a('PATCH', `/api/candidates/${noMail.id}/interviewer`, { interviewer_id: iv1.id })
-  assert.equal((await t.a('GET', '/api/approvals')).body.some((x) => x.candidate_id === noMail.id), false)
+  const forNoMail = (await t.a('GET', '/api/approvals')).body.filter((x) => x.candidate_id === noMail.id)
+  assert.deepEqual(forNoMail.map((x) => x.payload.to), ['a1@hr.test']) // nothing to the candidate (no address), but the interviewer is still briefed
   const done = (await t.a('POST', '/api/candidates', { drive_id: drive.id, full_name: 'Done Person', email: 'doneperson@example.com' })).body
   await t.a('PATCH', `/api/candidates/${done.id}/interviewer`, { interviewer_id: iv2.id })
   const before = (await mail(done.id)).length
@@ -504,4 +505,158 @@ test('the agent request carries the tools, a short-lived token for this user, an
     delete process.env.HIRERELAY_PUBLIC_URL; sent = null
     assert.equal((await t.a('POST', '/api/agent/message', { message: 'hi', thread_id: 'toolcheck' })).status, 200); assert.equal(sent.extra_tools, undefined)
   } finally { globalThis.fetch = realFetch; delete process.env.VIASOCKET_EMBED_SECRET; delete process.env.HIRERELAY_PUBLIC_URL }
+})
+
+
+// ---------- CV upload, secure links, interviewer briefing ----------
+const PDF = Buffer.concat([Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\n'), Buffer.alloc(200, 65), Buffer.from('\n%%EOF')])
+const DOCX = Buffer.concat([Buffer.from([0x50, 0x4b, 3, 4]), Buffer.alloc(30, 0), Buffer.from('word/document.xml'), Buffer.alloc(100, 1)])
+const DOC = Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), Buffer.alloc(200, 2)])
+const register = (slug, fields, file) => {
+  const fd = new FormData(); for (const [k, v] of Object.entries(fields)) fd.append(k, v)
+  if (file) fd.append('cv', new Blob([file.bytes]), file.name)
+  return fetch(`${t.base}/api/public/drives/${slug}/register`, { method: 'POST', body: fd }).then(async (r) => ({ status: r.status, body: await r.json() }))
+}
+const download = (token, id) => fetch(`${t.base}/api/candidates/${id}/cv`, { headers: token ? { authorization: `Bearer ${token}` } : {} })
+let tokA, tokB
+const login = async (who, email) => (await t.anon('POST', '/api/auth/login', { email, password: 'correct-horse-9' })).body.token
+
+test('file type detection trusts the bytes, not the name', async () => {
+  const { detectType } = await import('../src/lib/files.js')
+  assert.equal(detectType(PDF).ext, 'pdf'); assert.equal(detectType(DOCX).ext, 'docx'); assert.equal(detectType(DOC).ext, 'doc')
+  assert.equal(detectType(Buffer.from('MZ\x90\x00 this is an exe renamed cv.pdf '.repeat(5))), null)
+  assert.equal(detectType(Buffer.from('just some text, called cv.pdf'.repeat(5))), null)
+  assert.equal(detectType(Buffer.concat([Buffer.from([0x50, 0x4b, 3, 4]), Buffer.alloc(80, 0)])), null) // a zip that is not a Word document
+  assert.equal(detectType(Buffer.alloc(0)), null)
+})
+
+test('the registration form accepts a CV, rejects bad files without creating anyone, and keeps JSON working', async () => {
+  tokA = await login('a', 'a@hr.test'); tokB = await login('b', 'b@hr.test')
+  const ok = await register(drive.slug, { full_name: 'Cv Person', email: 'cvperson@example.com', phone: '9333333333' }, { bytes: PDF, name: '../../My CV (final).pdf' })
+  assert.equal(ok.status, 201)
+  const c = (await t.a('GET', '/api/candidates?q=cvperson')).body[0]
+  assert.equal(c.has_cv, true)
+  const detail = (await t.a('GET', `/api/candidates/${c.id}`)).body
+  assert.deepEqual([detail.cv.mime, detail.cv.size], ['application/pdf', PDF.length]); assert.ok(!/[\\/]/.test(detail.cv.name) && detail.cv.name.endsWith('.pdf'), detail.cv.name) // path tricks stripped
+  // wrong type / disguised file: refused, and nobody is created
+  const bad = await register(drive.slug, { full_name: 'Bad File', email: 'badfile@example.com' }, { bytes: Buffer.from('MZ not a document at all '.repeat(10)), name: 'cv.pdf' })
+  assert.equal(bad.status, 422); assert.match(bad.body.error, /PDF, DOC or DOCX/)
+  assert.equal((await t.a('GET', '/api/candidates?q=badfile')).body.length, 0)
+  // too large
+  const big = await register(drive.slug, { full_name: 'Big File', email: 'bigfile@example.com' }, { bytes: Buffer.concat([PDF, Buffer.alloc(5 * 1024 * 1024)]), name: 'cv.pdf' })
+  assert.equal(big.status, 413); assert.equal((await t.a('GET', '/api/candidates?q=bigfile')).body.length, 0)
+  // no file: still fine, in both encodings
+  assert.equal((await register(drive.slug, { full_name: 'No Cv Multipart', email: 'nocvm@example.com' })).status, 201)
+  assert.equal((await t.anon('POST', `/api/public/drives/${drive.slug}/register`, { full_name: 'No Cv Json', email: 'nocvj@example.com' })).status, 201)
+  assert.equal((await t.a('GET', '/api/candidates?q=nocvm')).body[0].has_cv, false)
+  // someone re-submitting with the same email cannot replace the CV that is already there
+  await register(drive.slug, { full_name: 'Cv Person', email: 'cvperson@example.com' }, { bytes: DOCX, name: 'evil.docx' })
+  assert.equal((await t.a('GET', `/api/candidates/${c.id}`)).body.cv.mime, 'application/pdf')
+  // ...but a duplicate can supply a CV when none exists yet
+  await register(drive.slug, { full_name: 'No Cv Multipart', email: 'nocvm@example.com' }, { bytes: DOC, name: 'late.doc' })
+  assert.equal((await t.a('GET', '/api/candidates?q=nocvm')).body[0].has_cv, true)
+})
+
+test('HR can download, replace and remove a CV; nobody else can', async () => {
+  const c = (await t.a('GET', '/api/candidates?q=cvperson')).body[0]
+  assert.equal((await download(null, c.id)).status, 401)
+  assert.equal((await download(tokB, c.id)).status, 404)                                   // another HR user
+  const r = await download(tokA, c.id)
+  assert.equal(r.status, 200); assert.equal(r.headers.get('content-type'), 'application/pdf')
+  assert.match(r.headers.get('content-disposition'), /^attachment;/); assert.equal(r.headers.get('x-content-type-options'), 'nosniff')
+  assert.ok(Buffer.from(await r.arrayBuffer()).equals(PDF))                                // bytes survive unchanged
+  const put = (token, file) => { const fd = new FormData(); fd.append('cv', new Blob([file.bytes]), file.name); return fetch(`${t.base}/api/candidates/${c.id}/cv`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: fd }) }
+  assert.equal((await put(tokB, { bytes: PDF, name: 'x.pdf' })).status, 404)
+  assert.equal((await put(tokA, { bytes: Buffer.from('plain text'.repeat(10)), name: 'x.pdf' })).status, 422)
+  assert.equal((await put(tokA, { bytes: DOCX, name: 'new.docx' })).status, 201)           // replaces the old one
+  const after = await download(tokA, c.id); assert.match(after.headers.get('content-type'), /wordprocessingml/)
+  assert.equal((await t.b('DELETE', `/api/candidates/${c.id}/cv`)).status, 404)
+  assert.equal((await t.a('DELETE', `/api/candidates/${c.id}/cv`)).status, 200)
+  assert.equal((await download(tokA, c.id)).status, 404)
+  assert.equal((await t.a('GET', `/api/candidates/${c.id}`)).body.cv, null)
+})
+
+test('deleting a candidate deletes their CV bytes from disk', async () => {
+  const fs = await import('node:fs'); const path = await import('node:path')
+  const { query } = await import('../src/db.js'); const { config } = await import('../src/config.js')
+  await register(drive.slug, { full_name: 'Disk Cleanup', email: 'diskclean@example.com' }, { bytes: PDF, name: 'cv.pdf' })
+  const c = (await t.a('GET', '/api/candidates?q=diskclean')).body[0]
+  const row = (await query('select storage_name from candidate_files where candidate_id = $1', [c.id])).rows[0]
+  const file = path.join(config.dataDir, 'cvs', row.storage_name)
+  assert.ok(fs.existsSync(file))
+  await t.a('DELETE', `/api/candidates/${c.id}`)
+  assert.ok(!fs.existsSync(file)); assert.equal((await query('select 1 from candidate_files where candidate_id = $1', [c.id])).rows.length, 0)
+})
+
+test('signed CV links: valid ones serve the file, forged, expired or unknown ones do not', async () => {
+  const { query } = await import('../src/db.js'); const { cvLinkPath } = await import('../src/lib/files.js'); const { config } = await import('../src/config.js')
+  await register(drive.slug, { full_name: 'Link Person', email: 'linkperson@example.com' }, { bytes: PDF, name: 'link cv.pdf' })
+  const c = (await t.a('GET', '/api/candidates?q=linkperson')).body[0]
+  const f = (await query('select * from candidate_files where candidate_id = $1', [c.id])).rows[0]
+  const get = (p) => fetch(`${t.base}${p}`)
+  const ok = await get(cvLinkPath(f)); assert.equal(ok.status, 200); assert.ok(Buffer.from(await ok.arrayBuffer()).equals(PDF))
+  assert.match(ok.headers.get('content-disposition'), /link cv\.pdf/)
+  const path = cvLinkPath(f); const parts = path.split('/')
+  const tampered = path.replace(/\.[A-Za-z0-9_-]+\//, (m) => m.slice(0, -2) + (m.at(-2) === 'a' ? 'b' : 'a') + '/')
+  assert.equal((await get(tampered)).status, 403)                                            // forged signature
+  const [id, exp, sig] = parts[4].split('.')
+  assert.equal((await get(`/api/files/cv/${id}.${Number(exp) + 99999}.${sig}/x`)).status, 403) // lengthened expiry breaks the signature
+  assert.equal((await get(cvLinkPath(f, -10))).status, 410)                                  // properly signed but expired
+  assert.equal((await get('/api/files/cv/nonsense/x')).status, 403)
+  assert.equal((await get(cvLinkPath({ ...f, id: crypto.randomUUID() }))).status, 404)       // signed for a file that does not exist
+})
+
+test('assigning an interviewer briefs them with the details, the form answers and the CV attached', async () => {
+  const { query } = await import('../src/db.js')
+  const realFetch = globalThis.fetch; const gmail = []
+  await query(`insert into viasocket_connections (owner_id, service_id, auth_id, script_id, config) values ($1,'rowo0bqrhj5g','auth_rowo0bqrhj5g','scriBRIEF',$2)`, [t.users.a.id, { from: 'me@example.com' }])
+  process.env.HIRERELAY_PUBLIC_URL = 'https://hirerelay.example.test'
+  globalThis.fetch = async (url, init) => String(url).includes('/func/scriBRIEF') ? (gmail.push(JSON.parse(init.body).inputData), new Response(JSON.stringify({ success: true, data: { id: `m${gmail.length}`, labelIds: ['SENT'] } }), { status: 200 })) : realFetch(url, init)
+  const settle = async (n) => { for (let i = 0; i < 40 && gmail.length < n; i++) await new Promise((r) => setTimeout(r, 100)) }
+  try {
+    const iv = (await t.a('POST', '/api/interviewers', { name: 'Brief Panelist', email: 'brief@hr.test' })).body
+    const noEmailIv = (await t.a('POST', '/api/interviewers', { name: 'Silent Panelist' })).body
+    // a candidate with a CV and a hostile form answer
+    await t.anon('POST', '/api/ingest/google-forms', { drive_id: drive.id, event: { responseId: 'brief-1', Full_Name: 'Brief Me', Email: 'briefme@example.com', Phone_No_: '9444444444', College: '<script>alert(1)</script> IIT' } }, { 'x-hirerelay-ingest-key': ingestKeyFor(drive.id) })
+    const c = (await t.a('GET', '/api/candidates?q=briefme')).body[0]
+    await t.a('POST', `/api/candidates/${c.id}/cv`) // no body: rejected, nothing stored
+    const fd = new FormData(); fd.append('cv', new Blob([PDF]), 'Brief Me CV.pdf')
+    assert.equal((await realFetch(`${t.base}/api/candidates/${c.id}/cv`, { method: 'POST', headers: { authorization: `Bearer ${tokA}` }, body: fd })).status, 201)
+
+    await t.a('PATCH', `/api/candidates/${c.id}/interviewer`, { interviewer_id: iv.id })
+    await settle(2)                                                                          // candidate email + interviewer briefing, both auto-sent
+    const toIv = gmail.find((g) => g.to === 'brief@hr.test'); const toCand = gmail.find((g) => g.to === 'briefme@example.com')
+    assert.ok(toIv && toCand, JSON.stringify(gmail.map((g) => g.to)))
+    assert.match(toIv.subject, /New candidate for you: Brief Me/)
+    for (const needle of ['Brief Me', 'briefme@example.com', '9444444444', 'Brief Panelist', 'College']) assert.ok(toIv.messageBody.includes(needle), needle)
+    assert.ok(!toIv.messageBody.includes('<script>') && toIv.messageBody.includes('&lt;script&gt;'))   // form answers are escaped
+    assert.ok(!toCand.attachments, 'the candidate does not get their own CV back')
+    // the attachment link works for the email service, and returns exactly the uploaded CV
+    assert.match(toIv.attachments, /^https:\/\/hirerelay\.example\.test\/api\/files\/cv\/[^,]+\/Brief%20Me%20CV\.pdf$/)
+    const fetched = await realFetch(t.base + new URL(toIv.attachments).pathname); assert.equal(fetched.status, 200); assert.ok(Buffer.from(await fetched.arrayBuffer()).equals(PDF))
+    // an interviewer with no email address: nobody to brief, and a candidate without a CV is briefed without one
+    const before = gmail.length
+    await t.a('PATCH', `/api/candidates/${c.id}/interviewer`, { interviewer_id: noEmailIv.id }); await new Promise((r) => setTimeout(r, 300))
+    assert.deepEqual(gmail.slice(before).map((g) => g.to), ['briefme@example.com'])           // only the "interviewer changed" note to the candidate
+    const plain = (await t.a('POST', '/api/candidates', { drive_id: drive.id, full_name: 'Plain Brief', email: 'plainbrief@example.com' })).body
+    await t.a('PATCH', `/api/candidates/${plain.id}/interviewer`, { interviewer_id: iv.id }); await settle(before + 3)
+    const plainMail = gmail.find((g) => g.to === 'brief@hr.test' && /Plain Brief/.test(g.subject))
+    assert.ok(plainMail && !plainMail.attachments && /did not upload a CV/.test(plainMail.messageBody))
+    // switch off: the briefing waits for approval, with the CV still attached once approved
+    await t.a('PUT', '/api/settings', { auto_send_interviewer_briefing: false })
+    const held = (await t.a('POST', '/api/candidates', { drive_id: drive.id, full_name: 'Held Brief', email: 'heldbrief@example.com' })).body
+    const fd2 = new FormData(); fd2.append('cv', new Blob([DOCX]), 'held.docx'); await realFetch(`${t.base}/api/candidates/${held.id}/cv`, { method: 'POST', headers: { authorization: `Bearer ${tokA}` }, body: fd2 })
+    const n = gmail.length; await t.a('PATCH', `/api/candidates/${held.id}/interviewer`, { interviewer_id: iv.id }); await settle(n + 1)
+    const pending = (await t.a('GET', '/api/approvals?status=pending')).body.find((a) => a.payload.to === 'brief@hr.test' && /Held Brief/.test(a.title))
+    assert.ok(pending && pending.payload.attachments[0].name === 'held.docx')
+    const sent = await t.a('POST', `/api/approvals/${pending.id}/approve`); assert.equal(sent.body.status, 'executed')
+    assert.match(gmail.at(-1).attachments, /held\.docx$/)
+    // no public address: the send fails clearly rather than dropping the CV silently
+    delete process.env.HIRERELAY_PUBLIC_URL
+    const lost = (await t.a('POST', '/api/candidates', { drive_id: drive.id, full_name: 'No Public Url', email: 'nopub@example.com' })).body
+    const fd3 = new FormData(); fd3.append('cv', new Blob([PDF]), 'p.pdf'); await realFetch(`${t.base}/api/candidates/${lost.id}/cv`, { method: 'POST', headers: { authorization: `Bearer ${tokA}` }, body: fd3 })
+    await t.a('PATCH', `/api/candidates/${lost.id}/interviewer`, { interviewer_id: iv.id })
+    const stuck = (await t.a('GET', '/api/approvals?status=pending')).body.find((a) => /No Public Url/.test(a.title) && a.payload.to === 'brief@hr.test')
+    const failed = await t.a('POST', `/api/approvals/${stuck.id}/approve`); assert.equal(failed.body.status, 'failed'); assert.match(failed.body.error, /HIRERELAY_PUBLIC_URL/)
+  } finally { globalThis.fetch = realFetch; delete process.env.HIRERELAY_PUBLIC_URL; await t.a('PUT', '/api/settings', { auto_send_interviewer_briefing: true }); await query('delete from viasocket_connections') }
 })
