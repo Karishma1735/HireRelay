@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Users, LogIn, Hourglass, CheckCircle2, ClipboardCheck, Plus, ArrowRight, Check, Clock, Timer, Inbox, Sparkles, CalendarDays, ShieldCheck } from 'lucide-react'
-import { get } from '../lib/api.js'
+import { get, patch } from '../lib/api.js'
 import { useAuth } from '../lib/auth.jsx'
 import { ago } from '../lib/format.js'
-import { Alert, Badge, Card, Empty, Spinner } from '../components/ui.jsx'
+import { Alert, Badge, Button, Card, Empty, Spinner } from '../components/ui.jsx'
 import { AreaChart, Funnel, LoadBars, RAMP } from '../components/charts.jsx'
 
 const minutesSince = (d) => (d ? Math.max(0, Math.round((Date.now() - new Date(d)) / 60000)) : null)
@@ -25,6 +25,35 @@ function Tile({ icon: Icon, label, value, hint, tone = 'indigo', to }) {
       {hint && <div className="text-xs leading-snug text-slate-500">{hint}</div>}
     </div>)
   return to ? <Link to={to} className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 rounded-2xl">{body}</Link> : body
+}
+
+/**
+ * Who could be called next: the longest waiter for each interviewer who is free, available and under their limit.
+ * Nothing happens until HR presses Assign; the usual emails then go out as for any assignment.
+ */
+function UpNext({ suggestions }) {
+  const qc = useQueryClient(); const [error, setError] = useState('')
+  const assign = useMutation({
+    mutationFn: ({ s, force }) => patch(`/candidates/${s.candidate.id}/interviewer`, { interviewer_id: s.interviewer.id, ...(force && { force: true }) }),
+    onSuccess: () => { setError(''); qc.invalidateQueries({ queryKey: ['dashboard'] }); qc.invalidateQueries({ queryKey: ['candidates'] }); qc.invalidateQueries({ queryKey: ['interviewers'] }) },
+    onError: (e, v) => { if (['on_break', 'left', 'inactive', 'full'].includes(e.code) && confirm(`${e.message} Assign anyway?`)) assign.mutate({ ...v, force: true }); else setError(e.message) }
+  })
+  if (!suggestions?.length) return null
+  return (
+    <Card title={<span className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-indigo-600" /> Suggested next</span>}>
+      <ul className="divide-y divide-slate-100">
+        {suggestions.map((s) => { const wait = minutesSince(s.candidate.checked_in_at); return (
+          <li key={s.candidate.id} className="flex flex-wrap items-center gap-3 py-2.5 text-sm">
+            <Avatar name={s.candidate.full_name} />
+            <div className="min-w-0 flex-1"><div className="font-medium"><Link to="/candidates" className="hover:text-indigo-700">{s.candidate.full_name}</Link> <span className="font-normal text-slate-500">→ {s.interviewer.name} is free</span></div>
+              <div className="text-xs text-slate-500">{[s.candidate.queue_number && `queue #${s.candidate.queue_number}`, wait != null && `waiting ${wait < 1 ? '<1' : wait} min`, s.candidate.rounds_total > 1 && `${s.candidate.round_name} round`, s.candidate.drive_name].filter(Boolean).join(' · ')}</div></div>
+            <Button size="sm" loading={assign.isPending && assign.variables?.s.candidate.id === s.candidate.id} onClick={() => assign.mutate({ s })}>Assign to {s.interviewer.name.split(' ')[0]}</Button>
+          </li>) })}
+      </ul>
+      {error && <div className="mt-2"><Alert>{error}</Alert></div>}
+      <p className="mt-2 text-xs text-slate-400">Picks the longest wait for each free interviewer who is not on a break and has room. You decide: nothing is assigned until you press the button.</p>
+    </Card>
+  )
 }
 
 function SetupChecklist({ setup, vs }) {
@@ -86,6 +115,7 @@ export default function Dashboard() {
 
       {dash.isLoading ? <Spinner /> : dash.isError ? <Alert>{dash.error.message}</Alert> : (<>
         <SetupChecklist setup={d.setup} vs={vs.data} />
+        <UpNext suggestions={d.suggestions} />
 
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
           <Tile icon={Users} label="Total candidates" value={m.total} hint="In this selection" to="/candidates" />

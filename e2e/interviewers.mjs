@@ -24,7 +24,7 @@ await step('cards show live counts', async () => { const t = (await page.locator
 await step('Deactivate does not navigate', async () => { await page.locator('a', { hasText: 'Arjun Rao' }).getByRole('button', { name: 'Deactivate' }).click(); await page.getByText('Inactive').waitFor(); if (!page.url().endsWith('/interviewers')) throw new Error('navigated: ' + page.url()) })
 await step('click Meera opens her page with her 3 candidates grouped by drive', async () => {
   await page.locator('a', { hasText: 'Meera Shah' }).click(); await page.getByText('Candidates assigned to Meera Shah').waitFor(); await page.getByText('Karan Patel').waitFor()
-  const heads = (await page.locator('section header').allInnerTexts()).map((h) => h.replace(/\s+/g, ' ')); console.log('      sections:', heads)
+  const heads = (await page.locator('section[aria-label^="Drive "] header').allInnerTexts()).map((h) => h.replace(/\s+/g, ' ')); console.log('      sections:', heads)
   const text = await page.locator('main').innerText(); if (text.includes('Neha Singh')) throw new Error("shows another interviewer's candidate"); if (heads.length !== 2) throw new Error('expected 2 drive sections') })
 
 await step('acting on the page updates her counts live (start interview)', async () => {

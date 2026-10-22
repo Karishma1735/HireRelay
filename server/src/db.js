@@ -12,7 +12,7 @@ const expand = (sql) => sql.replace(/\bnow\(\)/g, NOW).replace(/\bgen_uuid\(\)/g
 const schema = expand(fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../schema.sql'), 'utf8'))
 
 // Columns stored as JSON text / 0-1 integers, converted back on the way out.
-const JSON_COLS = new Set(['field_map', 'extra', 'payload', 'request', 'response', 'config', 'input_data', 'drive'])
+const JSON_COLS = new Set(['field_map', 'extra', 'payload', 'request', 'response', 'config', 'input_data', 'drive', 'rounds', 'drive_rounds'])
 const BOOL_COLS = new Set(['active', 'auto_send_confirmations', 'auto_queue_on_check_in', 'auto_send_queue_emails', 'auto_send_assignment_emails', 'auto_send_interviewer_briefing', 'email_feedback_alerts', 'has_feedback', 'has_cv', 'live', 'enabled', 'google_form_connected'])
 
 let db
@@ -25,11 +25,16 @@ export function getDb() {
   if (file !== ':memory:') db.exec('pragma journal_mode = WAL') // Embarko replicates SQLite files under DATA_DIR, which needs WAL
   db.exec(schema)
   // Columns added after first release: `create table if not exists` does not alter an existing table.
-  const cols = new Set(db.prepare('pragma table_info(settings)').all().map((c) => c.name))
-  for (const [name, sql] of [['auto_queue_on_check_in', 'integer not null default 1'], ['auto_send_queue_emails', 'integer not null default 1'], ['auto_send_assignment_emails', 'integer not null default 1'],
-    ['auto_send_interviewer_briefing', 'integer not null default 1'], ['email_feedback_alerts', 'integer not null default 1'], ['notify_email', 'text']]) {
-    if (!cols.has(name)) db.exec(`alter table settings add column ${name} ${sql}`)
+  for (const [table, name, sql] of [
+    ['settings', 'auto_queue_on_check_in', 'integer not null default 1'], ['settings', 'auto_send_queue_emails', 'integer not null default 1'], ['settings', 'auto_send_assignment_emails', 'integer not null default 1'],
+    ['settings', 'auto_send_interviewer_briefing', 'integer not null default 1'], ['settings', 'email_feedback_alerts', 'integer not null default 1'], ['settings', 'notify_email', 'text'],
+    ['drives', 'rounds', "text not null default '[]'"], ['candidates', 'round', 'integer not null default 1'], ['feedback', 'round', 'integer not null default 1'],
+    ['interviewers', 'availability', "text not null default 'available'"], ['interviewers', 'available_until', 'text'], ['interviewers', 'capacity', 'integer']]) {
+    const have = new Set(db.prepare(`pragma table_info(${table})`).all().map((c) => c.name))
+    if (!have.has(name)) db.exec(`alter table ${table} add column ${name} ${sql}`)
   }
+  // Feedback is per round now: swap the old one-per-candidate index for one-per-candidate-per-round.
+  db.exec('drop index if exists feedback_candidate_uq; create unique index if not exists feedback_candidate_round_uq on feedback(candidate_id, round);')
   return db
 }
 export function closeDb() { if (db) { db.close(); db = undefined; cache.clear() } }

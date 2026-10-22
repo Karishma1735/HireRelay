@@ -1,5 +1,6 @@
 import { one, many, query } from '../db.js'
 import { mapSubmission } from './mapper.js'
+import { roundInfo } from './rounds.js'
 
 /**
  * Creates a candidate from a form submission, or recognises a duplicate.
@@ -88,6 +89,11 @@ export async function changeStage(ownerId, id, stage, { interviewerId, autoQueue
     const iv = await one('select id from interviewers where id = $1 and owner_id = $2', [interviewerId, ownerId])
     if (!iv) return { error: 'Interviewer not found', status: 404 }
   }
+  // Only the last round can end in a selection; earlier rounds advance the candidate instead.
+  if (stage === 'selected') {
+    const drive = await one('select rounds from drives where id = $1', [c.drive_id]); const r = roundInfo(drive, c.round)
+    if (!r.final) return { error: `${c.full_name} is in round ${r.number} of ${r.total} (${r.name}). Advance them to ${r.next_name} first, or reject them.`, status: 409 }
+  }
   // Checking in can put the candidate straight into the queue (HR setting): same result as check-in followed by Add to queue.
   const goQueue = stage === 'checked_in' && autoQueue
   const sets = ['stage = $3', 'updated_at = now()']; const params = [id, ownerId, goQueue ? 'waiting' : stage]
@@ -107,6 +113,26 @@ export async function changeStage(ownerId, id, stage, { interviewerId, autoQueue
   if (stage === 'registered') sets.push('checked_in_at = null', 'queue_number = null')
   const row = await one(`update candidates set ${sets.join(', ')} where id = $1 and owner_id = $2 returning *`, params)
   return { candidate: row, prev: c.stage }
+}
+
+/**
+ * Moves a candidate who finished a round on to the next one. They go back into the queue (their wait starts again),
+ * their interviewer is cleared so the next round can have its own, and the finished round's feedback stays on record.
+ */
+export async function advanceRound(ownerId, id, { interviewerId } = {}) {
+  const c = await one('select * from candidates where id = $1 and owner_id = $2', [id, ownerId])
+  if (!c) return { error: 'Candidate not found', status: 404 }
+  const drive = await one('select * from drives where id = $1', [c.drive_id]); const r = roundInfo(drive, c.round)
+  if (c.stage !== 'completed') return { error: 'Only a candidate whose interview is completed can move to the next round', status: 409 }
+  if (r.final) return { error: `${r.name} is the last round. Select or reject the candidate instead`, status: 409 }
+  if (!(await one('select 1 from feedback where candidate_id = $1 and round = $2', [c.id, c.round]))) return { error: `Record the ${r.name} feedback before advancing`, status: 409 }
+  if (interviewerId && !(await one('select 1 from interviewers where id = $1 and owner_id = $2', [interviewerId, ownerId]))) return { error: 'Interviewer not found', status: 404 }
+  const row = await one(
+    `update candidates set round = round + 1, stage = 'waiting', interviewer_id = $3, interview_started_at = null, interview_completed_at = null,
+       checked_in_at = now(), queue_number = coalesce(queue_number, (select coalesce(max(queue_number),0)+1 from candidates where drive_id = $4)), updated_at = now()
+     where id = $1 and owner_id = $2 and stage = 'completed' and round = $5 returning *`, [c.id, ownerId, interviewerId ?? null, c.drive_id, c.round])
+  if (!row) return { error: 'The candidate changed while advancing. Reload and try again', status: 409 }
+  return { candidate: row, from: r, to: roundInfo(drive, row.round) }
 }
 
 /** Called as a candidate is deleted: remember which form response made them. */

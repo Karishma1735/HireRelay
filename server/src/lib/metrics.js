@@ -13,7 +13,7 @@ export async function dashboardMetrics(ownerId, driveId = null) {
        count(*) filter (where c.stage = 'in_interview') as in_interview,
        count(*) filter (where c.interview_completed_at is not null) as completed,
        count(*) filter (where c.interview_completed_at is not null and f.id is null) as pending_feedback
-     from candidates c left join feedback f on f.candidate_id = c.id
+     from candidates c left join feedback f on f.candidate_id = c.id and f.round = c.round
      where c.owner_id = $1 ${scope}`, p)
   const stages = await many(
     `select c.stage, count(*) as count from candidates c where c.owner_id = $1 ${scope} group by c.stage`, p)
@@ -48,7 +48,7 @@ export const pendingFeedbackList = (ownerId, driveId = null, limit = 50) => many
   `select c.id, c.full_name, c.email, c.role_applied, c.interview_completed_at, c.drive_id,
           i.id as interviewer_id, i.name as interviewer, i.email as interviewer_email
    from candidates c
-   left join feedback f on f.candidate_id = c.id
+   left join feedback f on f.candidate_id = c.id and f.round = c.round
    left join interviewers i on i.id = c.interviewer_id
    where c.owner_id = $1 and c.interview_completed_at is not null and f.id is null and ($2 is null or c.drive_id = $2)
    order by c.interview_completed_at limit $3`, [ownerId, driveId, limit])

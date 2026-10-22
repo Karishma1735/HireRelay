@@ -19,6 +19,8 @@ create table if not exists drives (
   slug text not null unique,
   status text not null default 'active' check (status in ('active','closed')),
   field_map text not null default '{}',
+  -- Names of the interview rounds in order, e.g. ["Technical","HR"]. Empty means one round called "Interview".
+  rounds text not null default '[]',
   created_at text not null default (now())
 );
 create index if not exists drives_owner_idx on drives(owner_id);
@@ -29,6 +31,11 @@ create table if not exists interviewers (
   name text not null,
   email text,
   active integer not null default 1,
+  -- Availability: 'on_break' pauses assignments; available_until is when they leave today (an ISO time). Both are optional.
+  availability text not null default 'available' check (availability in ('available','on_break')),
+  available_until text,
+  -- Most candidates they should see in one drive (null = no limit).
+  capacity integer check (capacity is null or capacity >= 1),
   created_at text not null default (now())
 );
 create index if not exists interviewers_owner_idx on interviewers(owner_id);
@@ -49,6 +56,7 @@ create table if not exists candidates (
   external_ref text,
   extra text not null default '{}',
   -- HR-managed fields: form synchronisation never writes these after the row exists.
+  round integer not null default 1,
   stage text not null default 'registered'
     check (stage in ('registered','checked_in','waiting','in_interview','completed','selected','rejected','no_show')),
   queue_number integer,
@@ -70,12 +78,13 @@ create table if not exists feedback (
   owner_id text not null references users(id) on delete cascade,
   candidate_id text not null references candidates(id) on delete cascade,
   interviewer_id text references interviewers(id) on delete set null,
+  round integer not null default 1,
   rating integer not null check (rating between 1 and 5),
   recommendation text not null check (recommendation in ('hire','hold','reject')),
   notes text,
   created_at text not null default (now())
 );
-create unique index if not exists feedback_candidate_uq on feedback(candidate_id);
+-- One feedback per candidate per round: the unique index is created in db.js, after older databases gain the column.
 
 create table if not exists approvals (
   id text primary key default (gen_uuid()),

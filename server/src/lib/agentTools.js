@@ -12,9 +12,9 @@ const text = z.string().trim().max(120).optional().transform((v) => v || undefin
 const like = (v) => (v ? `%${v.replace(/[%_]/g, '')}%` : null)
 
 const CAND_COLS = `c.id, c.full_name as name, c.email, c.phone, c.role_applied as role, c.experience_years, c.current_company as company,
-  c.stage, c.queue_number, c.source, d.name as drive, i.name as interviewer, c.created_at as registered_at, c.checked_in_at,
+  c.stage, c.round, c.queue_number, c.source, d.name as drive, i.name as interviewer, c.created_at as registered_at, c.checked_in_at,
   c.interview_started_at, c.interview_completed_at, c.updated_at as last_changed_at, f.rating, f.recommendation, (f.id is not null) as has_feedback`
-const CAND_FROM = `from candidates c join drives d on d.id = c.drive_id left join interviewers i on i.id = c.interviewer_id left join feedback f on f.candidate_id = c.id`
+const CAND_FROM = `from candidates c join drives d on d.id = c.drive_id left join interviewers i on i.id = c.interviewer_id left join feedback f on f.candidate_id = c.id and f.round = c.round`
 
 export const TOOLS = {
   get_overview: {
@@ -60,7 +60,7 @@ export const TOOLS = {
   },
 
   get_candidate: {
-    description: 'Everything about one candidate: profile, all form answers, stage and timestamps, interviewer, interview feedback (rating, recommendation, notes), and the emails sent or queued for them. Give a candidate_id (from search_candidates) or a name.',
+    description: 'Everything about one candidate: profile, all form answers, stage and timestamps, interviewer, interview feedback for every round (round number, rating, recommendation, notes), the current interview round, and the emails sent or queued for them. Give a candidate_id (from search_candidates) or a name.',
     fields: { candidate_id: { type: 'string', description: 'The candidate id from search_candidates' }, name: { type: 'string', description: 'Part of the candidate name, if no id is known' } },
     required: [],
     schema: z.object({ candidate_id: text, name: text }),
@@ -71,9 +71,9 @@ export const TOOLS = {
       if (matches.length > 1) return { found: false, message: 'Several candidates match; ask which one.', matches: await many(`select ${CAND_COLS} ${CAND_FROM} where c.owner_id = $1 and c.id in (${matches.map((_, i) => `$${i + 2}`).join(',')})`, [ownerId, ...matches.map((m) => m.id)]) }
       const id = matches[0].id
       const c = await one(`select ${CAND_COLS}, c.extra ${CAND_FROM} where c.owner_id = $1 and c.id = $2`, [ownerId, id])
-      const feedback = await one('select rating, recommendation, notes, created_at from feedback where candidate_id = $1', [id])
+      const feedback = await many('select round, rating, recommendation, notes, created_at from feedback where candidate_id = $1 order by round', [id])
       const emails = await many('select title, status, error, requested_by, created_at from approvals where owner_id = $1 and candidate_id = $2 order by created_at desc limit 10', [ownerId, id])
-      return { found: true, candidate: c, feedback, emails }
+      return { found: true, candidate: c, feedback: feedback.find((f) => f.round === c.round) || null, feedback_all_rounds: feedback, emails }
     }
   },
 
@@ -83,7 +83,7 @@ export const TOOLS = {
     required: [],
     schema: z.object({ recommendation: z.enum(['hire', 'hold', 'reject']).optional().or(z.literal('').transform(() => undefined)), interviewer: text, drive: text, limit: limit() }),
     run: async (ownerId, a) => ({ feedback: await many(
-      `select c.full_name as candidate, c.id as candidate_id, d.name as drive, i.name as interviewer, f.rating, f.recommendation, f.notes, f.created_at
+      `select c.full_name as candidate, c.id as candidate_id, d.name as drive, f.round, i.name as interviewer, f.rating, f.recommendation, f.notes, f.created_at
        from feedback f join candidates c on c.id = f.candidate_id join drives d on d.id = c.drive_id left join interviewers i on i.id = f.interviewer_id
        where f.owner_id = $1 and ($2 is null or f.recommendation = $2) and ($3 is null or i.name like $3) and ($4 is null or d.name like $4)
        order by f.created_at desc limit ${a.limit}`, [ownerId, a.recommendation ?? null, like(a.interviewer), like(a.drive)]) })
@@ -110,7 +110,7 @@ export const TOOLS = {
          (select count(*) from candidates c where c.interviewer_id = i.id and c.stage = 'waiting') as waiting,
          (select count(*) from candidates c where c.interviewer_id = i.id and c.stage = 'in_interview') as in_interview,
          (select count(*) from candidates c where c.interviewer_id = i.id and c.interview_completed_at is not null) as interviewed,
-         (select count(*) from candidates c left join feedback f on f.candidate_id = c.id where c.interviewer_id = i.id and c.interview_completed_at is not null and f.id is null) as feedback_owed
+         (select count(*) from candidates c left join feedback f on f.candidate_id = c.id and f.round = c.round where c.interviewer_id = i.id and c.interview_completed_at is not null and f.id is null) as feedback_owed
        from interviewers i where i.owner_id = $1 order by i.active desc, i.name`, [ownerId]) })
   },
 

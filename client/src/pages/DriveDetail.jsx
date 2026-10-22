@@ -6,6 +6,7 @@ import { get, post, patch, del } from '../lib/api.js'
 import CandidateTable from '../components/CandidateTable.jsx'
 import { Alert, Badge, Button, Card, Field, Modal, Spinner } from '../components/ui.jsx'
 import { ago } from '../lib/format.js'
+import { parseRounds } from './Drives.jsx'
 
 export default function DriveDetail() {
   const { id } = useParams(); const qc = useQueryClient()
@@ -30,6 +31,7 @@ export default function DriveDetail() {
         </Card>
         <GoogleFormCard drive={d} />
       </div>
+      <RoundsCard key={(d.rounds || []).join('|')} drive={d} />
       <CandidateTable driveId={d.id} />
       {adding && <AddCandidate driveId={d.id} onClose={() => { setAdding(false); qc.invalidateQueries({ queryKey: ['candidates'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }) }} />}
     </div>
@@ -99,5 +101,25 @@ function AddCandidate({ driveId, onClose }) {
         {error && <Alert>{error}</Alert>}<Button className="w-full" loading={add.isPending}>Add candidate</Button>
       </form>
     </Modal>
+  )
+}
+
+/** The interview rounds for this drive. Changing them affects what candidates do next, never what has already happened. */
+function RoundsCard({ drive }) {
+  const qc = useQueryClient(); const names = drive.rounds?.length ? drive.rounds : []
+  const [text, setText] = useState(names.join(', ')); const [error, setError] = useState('')
+  const save = useMutation({ mutationFn: () => patch(`/drives/${drive.id}`, { rounds: parseRounds(text) }), onSuccess: () => { setError(''); qc.invalidateQueries({ queryKey: ['drive', drive.id] }); qc.invalidateQueries({ queryKey: ['drives'] }); qc.invalidateQueries({ queryKey: ['candidates'] }) }, onError: (e) => setError(e.message) })
+  const dirty = parseRounds(text).join('|') !== names.join('|')
+  return (
+    <Card title="Interview rounds" action={<Badge tone={names.length > 1 ? 'indigo' : 'slate'}>{names.length > 1 ? `${names.length} rounds` : 'Single interview'}</Badge>}>
+      <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => { e.preventDefault(); save.mutate() }}>
+        <div className="min-w-[220px] flex-1"><Field label="Rounds, in order, separated by commas"><input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder="Technical, HR, Manager" /></Field></div>
+        <Button loading={save.isPending} disabled={!dirty}>Save rounds</Button>
+      </form>
+      <p className="mt-2 text-xs text-slate-500">{names.length > 1
+        ? `Candidates advance through ${names.join(' → ')}. Each round has its own interviewer and feedback, and only the last round can end in Selected.`
+        : 'Add two or more rounds (for example Technical, HR) to run a multi-round process. Leave blank for one interview.'}</p>
+      {error && <div className="mt-2"><Alert>{error}</Alert></div>}
+    </Card>
   )
 }

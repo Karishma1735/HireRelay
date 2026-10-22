@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Search, Trash2, ChevronDown, ChevronRight, Paperclip, FileText, Download, Upload, X } from 'lucide-react'
+import { Search, Trash2, ChevronDown, ChevronRight, Paperclip, FileText, Download, Upload, X, ArrowRight } from 'lucide-react'
 import { get, post, patch, del, upload, openProtectedFile } from '../lib/api.js'
 import { STAGE_LABEL } from '../lib/format.js'
 import { Alert, Button, Empty, Field, Modal, Spinner, StageBadge } from './ui.jsx'
@@ -13,6 +13,9 @@ const NEXT = {
   waiting: [['in_interview', 'Start interview']],
   in_interview: [['completed', 'Complete']], completed: [['selected', 'Select'], ['rejected', 'Reject']], no_show: [['registered', 'Reopen']]
 }
+// Before the last round, "Select" becomes "Advance": the candidate goes on to the next round instead of being selected.
+const actionsFor = (c) => (c.stage === 'completed' && !c.final_round ? [['advance', `Advance to ${c.next_round_name}`], ['rejected', 'Reject']] : NEXT[c.stage] || [])
+const AVAILABILITY_NOTE = { on_break: 'on break', left: 'has left' }
 const CAN_NO_SHOW = new Set(['registered', 'checked_in', 'waiting'])
 
 export default function CandidateTable({ driveId, interviewerId, initialPendingFeedback = false }) {
@@ -25,7 +28,13 @@ export default function CandidateTable({ driveId, interviewerId, initialPendingF
   const ivs = useQuery({ queryKey: ['interviewers'], queryFn: () => get('/interviewers') })
   const refresh = () => { qc.invalidateQueries({ queryKey: ['candidates'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); qc.invalidateQueries({ queryKey: ['drives'] }); qc.invalidateQueries({ queryKey: ['interviewers'] }); qc.invalidateQueries({ queryKey: ['interviewer'] }) }
   const move = useMutation({ mutationFn: ({ id, stage }) => post(`/candidates/${id}/stage`, { stage }), onSuccess: () => { setError(''); refresh() }, onError: (e) => setError(e.message) })
-  const assign = useMutation({ mutationFn: ({ id, interviewer_id }) => patch(`/candidates/${id}/interviewer`, { interviewer_id: interviewer_id || null }), onSuccess: refresh, onError: (e) => setError(e.message) })
+  // The server warns when the interviewer is on a break, has left, or is at their limit; HR can still go ahead.
+  const assign = useMutation({
+    mutationFn: ({ id, interviewer_id, force }) => patch(`/candidates/${id}/interviewer`, { interviewer_id: interviewer_id || null, ...(force && { force: true }) }),
+    onSuccess: () => { setError(''); refresh() },
+    onError: (e, v) => { if (['on_break', 'left', 'inactive', 'full'].includes(e.code) && confirm(`${e.message} Assign anyway?`)) assign.mutate({ ...v, force: true }); else { setError(e.message); refresh() } }
+  })
+  const advance = useMutation({ mutationFn: ({ id }) => post(`/candidates/${id}/advance`), onSuccess: () => { setError(''); refresh() }, onError: (e) => setError(e.message) })
   const remove = useMutation({
     mutationFn: (ids) => post('/candidates/delete', { ids }),
     onSuccess: () => { setSel(new Set()); setError(''); refresh() }, onError: (e) => setError(e.message)
@@ -55,13 +64,18 @@ export default function CandidateTable({ driveId, interviewerId, initialPendingF
       <td className="px-3 py-2 tabular-nums text-slate-400">{c.queue_number ?? ''}</td>
       <td className="px-3 py-2"><button className="inline-flex items-center gap-1.5 text-left font-medium text-slate-900 hover:text-indigo-700" onClick={() => setOpen(c.id)}>{c.full_name}{c.has_cv && <Paperclip className="h-3.5 w-3.5 text-indigo-500" aria-label="Has a CV" />}</button>
         <div className="text-xs text-slate-500">{[c.email, c.phone].filter(Boolean).join(' · ')}</div></td>
-      <td className="px-3 py-2"><StageBadge stage={c.stage} />{c.interview_completed_at && !c.has_feedback && <span className="ml-1 text-xs text-rose-600">feedback due</span>}</td>
+      <td className="px-3 py-2"><StageBadge stage={c.stage} />{c.interview_completed_at && !c.has_feedback && <span className="ml-1 text-xs text-rose-600">feedback due</span>}
+        {c.rounds_total > 1 && <div className="mt-1"><span className="inline-block whitespace-nowrap rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600" title={`Round ${c.round} of ${c.rounds_total}`}>Round {c.round} · {c.round_name}</span></div>}</td>
       <td className="px-3 py-2">
         <select className="input !py-1 !text-xs" value={c.interviewer_id || ''} onChange={(e) => assign.mutate({ id: c.id, interviewer_id: e.target.value })} aria-label="Interviewer">
-          <option value="">Unassigned</option>{activeIvs.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+          <option value="">Unassigned</option>{activeIvs.map((i) => <option key={i.id} value={i.id}>{i.name}{AVAILABILITY_NOTE[i.availability_state] ? ` (${AVAILABILITY_NOTE[i.availability_state]})` : ''}</option>)}
         </select></td>
       <td className="px-3 py-2"><div className="flex justify-end gap-1.5">
-        {(NEXT[c.stage] || []).map(([to, label0]) => { const label = to === 'checked_in' && autoQueue ? 'Check in & queue' : label0; return (
+        {actionsFor(c).map(([to, label0]) => { const label = to === 'checked_in' && autoQueue ? 'Check in & queue' : label0
+          if (to === 'advance') return (
+            <Button key={to} size="sm" disabled={!c.has_feedback} title={c.has_feedback ? undefined : `Record the ${c.round_name} feedback first`} loading={advance.isPending && advance.variables?.id === c.id}
+              onClick={() => confirm(`Move ${c.full_name} on to the ${c.next_round_name} round? They go back into the queue and are emailed their number.`) && advance.mutate({ id: c.id })}>{label} <ArrowRight className="h-3.5 w-3.5" /></Button>)
+          return (
           <Button key={to} size="sm" variant={to === 'rejected' ? 'danger' : 'secondary'} disabled={to === 'in_interview' && !c.interviewer_id} title={to === 'in_interview' && !c.interviewer_id ? 'Assign an interviewer first' : undefined}
             loading={move.isPending && move.variables?.id === c.id && move.variables?.stage === to} onClick={() => move.mutate({ id: c.id, stage: to })}>{label}</Button>) })}
         {c.interview_completed_at && !c.has_feedback && <Button size="sm" onClick={() => setOpen(c.id)}>Feedback</Button>}
@@ -125,7 +139,7 @@ function CandidateModal({ id, onClose }) {
   return (
     <Modal title={d?.full_name || 'Candidate'} onClose={onClose}>
       {!d ? <Spinner /> : (<div className="space-y-4 text-sm">
-        <div className="flex items-center gap-2"><StageBadge stage={d.stage} /><span className="text-slate-500">{d.drive_name} · via {d.source.replace('_', ' ')}</span></div>
+        <div className="flex flex-wrap items-center gap-2"><StageBadge stage={d.stage} />{d.rounds_total > 1 && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">Round {d.round} of {d.rounds_total} · {d.round_name}</span>}<span className="text-slate-500">{d.drive_name} · via {d.source.replace('_', ' ')}</span></div>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
           {[['Email', d.email], ['Phone', d.phone], ['Role', d.role_applied], ['Experience', d.experience_years != null ? `${d.experience_years} yrs` : null], ['Company', d.current_company], ['Interviewer', d.interviewer_name]].map(([k, v]) => (
             <div key={k}><dt className="text-xs text-slate-500">{k}</dt><dd className="break-words">{v || '—'}</dd></div>))}
@@ -134,9 +148,13 @@ function CandidateModal({ id, onClose }) {
           <dl className="mt-2 space-y-1">{Object.entries(d.extra).map(([k, v]) => <div key={k}><dt className="text-xs text-slate-500">{k.replace(/_/g, ' ')}</dt><dd>{v || '—'}</dd></div>)}</dl></details>}
         <CvSection id={id} cv={d.cv} />
         <div className="border-t pt-4">
-          <h4 className="mb-2 font-semibold">Interview feedback</h4>
-          {d.feedback ? (<div className="rounded-lg bg-emerald-50 p-3"><div>Rating <b>{d.feedback.rating}/5</b> · <b className="capitalize">{d.feedback.recommendation}</b></div>{d.feedback.notes && <p className="mt-1 text-slate-700">{d.feedback.notes}</p>}{note && <p className="mt-2 text-xs text-emerald-700">{note}</p>}</div>)
-            : !d.interview_completed_at ? <p className="text-slate-500">Feedback can be recorded once the interview is completed.</p>
+          <h4 className="mb-2 font-semibold">Interview feedback{d.rounds_total > 1 && !d.feedback && d.interview_completed_at ? ` · ${d.round_name} round` : ''}</h4>
+          {(d.feedbacks || []).map((f) => (<div key={f.id} className="mb-2 rounded-lg bg-emerald-50 p-3">
+            {d.rounds_total > 1 && <div className="mb-0.5 text-xs font-semibold uppercase tracking-wide text-emerald-800">Round {f.round} · {f.round_name}{f.interviewer_name ? ` · ${f.interviewer_name}` : ''}</div>}
+            <div>Rating <b>{f.rating}/5</b> · <b className="capitalize">{f.recommendation}</b></div>{f.notes && <p className="mt-1 text-slate-700">{f.notes}</p>}
+            {f.round === d.round && note && <p className="mt-2 text-xs text-emerald-700">{note}</p>}</div>))}
+          {d.feedback ? null
+            : !d.interview_completed_at ? !d.feedbacks?.length && <p className="text-slate-500">Feedback can be recorded once the interview is completed.</p>
             : (<form className="space-y-3" onSubmit={(e) => { e.preventDefault(); setError(''); save.mutate() }}>
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Rating (1–5)"><select className="input" value={fb.rating} onChange={(e) => setFb({ ...fb, rating: Number(e.target.value) })}>{[1, 2, 3, 4, 5].map((n) => <option key={n}>{n}</option>)}</select></Field>

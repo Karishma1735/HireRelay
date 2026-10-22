@@ -68,7 +68,7 @@ export async function validProposals(ownerId, proposals) {
     } else if (p.type === 'feedback_reminder' && p.interviewer_id) {
       if (await one(
         `select 1 from interviewers i where i.id = $1 and i.owner_id = $2 and i.email is not null and exists
-           (select 1 from candidates c left join feedback f on f.candidate_id = c.id where c.interviewer_id = i.id and c.interview_completed_at is not null and f.id is null)`,
+           (select 1 from candidates c left join feedback f on f.candidate_id = c.id and f.round = c.round where c.interviewer_id = i.id and c.interview_completed_at is not null and f.id is null)`,
         [p.interviewer_id, ownerId])) ok.push(p)
     }
   }

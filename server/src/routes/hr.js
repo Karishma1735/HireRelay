@@ -3,7 +3,9 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { one, many, query } from '../db.js'
 import { slugify } from '../lib/normalize.js'
-import { upsertFromSubmission, logIngest, changeStage, rememberDeletion, STAGES } from '../lib/candidates.js'
+import { upsertFromSubmission, logIngest, changeStage, advanceRound, rememberDeletion, STAGES } from '../lib/candidates.js'
+import { roundInfo, roundNames, withRound } from '../lib/rounds.js'
+import { availabilityOf, assignmentProblem, suggestNext } from '../lib/interviewers.js'
 import { dashboardMetrics, waitingList, pendingFeedbackList, registrationsTimeline, nowInterviewing, interviewerLoad } from '../lib/metrics.js'
 import { approveAndExecute, requestApproval, retry } from '../lib/approvals.js'
 import { interviewReminder, feedbackReminder } from '../lib/emails.js'
@@ -14,6 +16,7 @@ import { sendFile } from './files.js'
 import { notifyQueued, notifyAssigned, notifyFeedback } from '../lib/queue.js'
 
 const uuid = z.string().uuid()
+const roundList = z.array(z.string().trim().min(2).max(40)).max(6)
 const opt = (s) => s.optional().nullable().or(z.literal('').transform(() => null))
 
 export function hrRoutes() {
@@ -31,11 +34,11 @@ export function hrRoutes() {
   })
 
   r.post('/drives', async (req, res) => {
-    const b = z.object({ name: z.string().trim().min(2).max(120), role_title: opt(z.string().max(120)), venue: opt(z.string().max(200)), drive_date: opt(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)) }).parse(req.body)
+    const b = z.object({ name: z.string().trim().min(2).max(120), role_title: opt(z.string().max(120)), venue: opt(z.string().max(200)), drive_date: opt(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)), rounds: roundList.optional() }).parse(req.body)
     const slug = `${slugify(b.name)}-${crypto.randomBytes(3).toString('hex')}`
     res.status(201).json(await one(
-      `insert into drives (owner_id, name, role_title, venue, drive_date, slug) values ($1,$2,$3,$4,$5,$6) returning *`,
-      [owner(req), b.name, b.role_title ?? null, b.venue ?? null, b.drive_date ?? null, slug]))
+      `insert into drives (owner_id, name, role_title, venue, drive_date, slug, rounds) values ($1,$2,$3,$4,$5,$6,$7) returning *`,
+      [owner(req), b.name, b.role_title ?? null, b.venue ?? null, b.drive_date ?? null, slug, b.rounds?.length > 1 ? b.rounds : []]))
   })
 
   r.get('/drives/:id', async (req, res) => {
@@ -51,14 +54,14 @@ export function hrRoutes() {
     const b = z.object({
       name: z.string().trim().min(2).max(120).optional(), role_title: opt(z.string().max(120)), venue: opt(z.string().max(200)),
       drive_date: opt(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)), status: z.enum(['active', 'closed']).optional(),
-      field_map: z.record(z.string().max(200)).optional()
+      field_map: z.record(z.string().max(200)).optional(), rounds: roundList.optional()
     }).parse(req.body)
     const d = await one('select * from drives where id = $1 and owner_id = $2', [uuid.parse(req.params.id), owner(req)])
     if (!d) return res.status(404).json({ error: 'Drive not found' })
     const m = { ...d, ...Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined)) }
     res.json(await one(
-      `update drives set name=$2, role_title=$3, venue=$4, drive_date=$5, status=$6, field_map=$7 where id=$1 returning *`,
-      [d.id, m.name, m.role_title, m.venue, m.drive_date, m.status, m.field_map]))
+      `update drives set name=$2, role_title=$3, venue=$4, drive_date=$5, status=$6, field_map=$7, rounds=$8 where id=$1 returning *`,
+      [d.id, m.name, m.role_title, m.venue, m.drive_date, m.status, m.field_map, m.rounds?.length > 1 ? m.rounds : []]))
   })
 
   // ---------- interviewers ----------
@@ -67,49 +70,67 @@ export function hrRoutes() {
     (select count(*) from candidates c where c.interviewer_id = i.id) as assigned,
     (select count(*) from candidates c where c.interviewer_id = i.id and c.stage = 'waiting') as waiting,
     (select count(*) from candidates c where c.interviewer_id = i.id and c.stage = 'in_interview') as in_interview,
-    (select count(*) from candidates c where c.interviewer_id = i.id and c.interview_completed_at is not null) as interviewed,
-    (select count(*) from candidates c left join feedback f on f.candidate_id = c.id
+    (select count(*) from feedback f where f.interviewer_id = i.id)
+      + (select count(*) from candidates c left join feedback f on f.candidate_id = c.id and f.round = c.round
+          where c.interviewer_id = i.id and c.interview_completed_at is not null and f.id is null) as interviewed,
+    (select count(*) from candidates c left join feedback f on f.candidate_id = c.id and f.round = c.round
        where c.interviewer_id = i.id and c.interview_completed_at is not null and f.id is null) as feedback_due`
-  r.get('/interviewers', async (req, res) => res.json(await many(
-    `select i.*, ${INTERVIEWER_STATS} from interviewers i where i.owner_id = $1 order by i.active desc, i.name`, [owner(req)])))
+  // The stored availability plus what it means right now (a "leaving at" time that has passed counts as left).
+  const withAvailability = (row) => row && { ...row, ...Object.fromEntries([['available_now', availabilityOf(row).state === 'available'], ['availability_state', availabilityOf(row).state]]) }
+  r.get('/interviewers', async (req, res) => res.json((await many(
+    `select i.*, ${INTERVIEWER_STATS} from interviewers i where i.owner_id = $1 order by i.active desc, i.name`, [owner(req)])).map(withAvailability)))
   r.get('/interviewers/:id', async (req, res) => {
     const row = await one(`select i.*, ${INTERVIEWER_STATS} from interviewers i where i.id = $1 and i.owner_id = $2`, [uuid.parse(req.params.id), owner(req)])
-    row ? res.json(row) : res.status(404).json({ error: 'Interviewer not found' })
+    row ? res.json(withAvailability(row)) : res.status(404).json({ error: 'Interviewer not found' })
   })
   r.post('/interviewers', async (req, res) => {
     const b = z.object({ name: z.string().trim().min(2).max(120), email: opt(z.string().email()) }).parse(req.body)
     res.status(201).json(await one(`insert into interviewers (owner_id, name, email) values ($1,$2,$3) returning *`, [owner(req), b.name, b.email ?? null]))
   })
   r.patch('/interviewers/:id', async (req, res) => {
-    const b = z.object({ active: z.boolean().optional(), email: opt(z.string().email()), name: z.string().trim().min(2).optional() }).parse(req.body)
+    const b = z.object({
+      active: z.boolean().optional(), email: opt(z.string().email()), name: z.string().trim().min(2).optional(),
+      availability: z.enum(['available', 'on_break']).optional(),
+      // null clears it. An ISO time: when the interviewer leaves for the day.
+      available_until: z.string().datetime({ offset: true }).nullable().optional(), capacity: z.number().int().min(1).max(500).nullable().optional()
+    }).parse(req.body)
+    const id = uuid.parse(req.params.id)
+    if (!(await one('select 1 from interviewers where id = $1 and owner_id = $2', [id, owner(req)]))) return res.status(404).json({ error: 'Interviewer not found' })
+    // Fields sent as null are cleared; fields left out keep their value.
+    const has = (k) => Object.prototype.hasOwnProperty.call(b, k)
     const row = await one(
-      `update interviewers set active = coalesce($3, active), email = coalesce($4, email), name = coalesce($5, name) where id = $1 and owner_id = $2 returning *`,
-      [uuid.parse(req.params.id), owner(req), b.active ?? null, b.email ?? null, b.name ?? null])
-    row ? res.json(row) : res.status(404).json({ error: 'Interviewer not found' })
+      `update interviewers set active = coalesce($3, active), email = coalesce($4, email), name = coalesce($5, name), availability = coalesce($6, availability),
+         available_until = case when $7 = 1 then $8 else available_until end, capacity = case when $9 = 1 then $10 else capacity end
+       where id = $1 and owner_id = $2 returning *`,
+      [id, owner(req), b.active ?? null, b.email ?? null, b.name ?? null, b.availability ?? null, has('available_until') ? 1 : 0, b.available_until ?? null, has('capacity') ? 1 : 0, b.capacity ?? null])
+    res.json(withAvailability(row))
   })
 
   // ---------- candidates ----------
   r.get('/candidates', async (req, res) => {
     const q = z.object({ drive_id: uuid.optional(), interviewer_id: uuid.optional(), stage: z.enum(STAGES).optional(), q: z.string().max(100).optional(), pending_feedback: z.enum(['1']).optional(), limit: z.coerce.number().int().min(1).max(500).default(200) }).parse(req.query)
-    res.json(await many(
-      `select c.*, d.name as drive_name, i.name as interviewer_name, (f.id is not null) as has_feedback,
+    res.json((await many(
+      `select c.*, d.name as drive_name, d.rounds as drive_rounds, i.name as interviewer_name, (f.id is not null) as has_feedback,
          exists (select 1 from candidate_files cf where cf.candidate_id = c.id) as has_cv
        from candidates c join drives d on d.id = c.drive_id
-       left join interviewers i on i.id = c.interviewer_id left join feedback f on f.candidate_id = c.id
+       left join interviewers i on i.id = c.interviewer_id left join feedback f on f.candidate_id = c.id and f.round = c.round
        where c.owner_id = $1 and ($2 is null or c.drive_id = $2) and ($3 is null or c.stage = $3) and ($7 is null or c.interviewer_id = $7)
          and ($4 is null or c.full_name like '%'||$4||'%' or c.email like '%'||$4||'%' or c.phone like '%'||$4||'%')
          and ($5 is null or (c.interview_completed_at is not null and f.id is null))
        order by case c.stage when 'in_interview' then 0 when 'waiting' then 1 else 2 end, c.queue_number nulls last, c.created_at desc limit $6`,
-      [owner(req), q.drive_id ?? null, q.stage ?? null, q.q ?? null, q.pending_feedback === '1' ? true : null, q.limit, q.interviewer_id ?? null]))
+      [owner(req), q.drive_id ?? null, q.stage ?? null, q.q ?? null, q.pending_feedback === '1' ? true : null, q.limit, q.interviewer_id ?? null])).map(withRound))
   })
 
   r.get('/candidates/:id', async (req, res) => {
     const c = await one(
-      `select c.*, d.name as drive_name, i.name as interviewer_name from candidates c join drives d on d.id = c.drive_id
+      `select c.*, d.name as drive_name, d.rounds as drive_rounds, i.name as interviewer_name from candidates c join drives d on d.id = c.drive_id
        left join interviewers i on i.id = c.interviewer_id where c.id = $1 and c.owner_id = $2`, [uuid.parse(req.params.id), owner(req)])
     if (!c) return res.status(404).json({ error: 'Candidate not found' })
     const cv = await cvOf(c.id, owner(req))
-    res.json({ ...c, feedback: await one('select * from feedback where candidate_id = $1', [c.id]), cv: cv && { name: cv.original_name, size: cv.size, mime: cv.mime, uploaded_at: cv.created_at, source: cv.source } })
+    const feedbacks = (await many(
+      `select f.*, i.name as interviewer_name from feedback f left join interviewers i on i.id = f.interviewer_id where f.candidate_id = $1 order by f.round`, [c.id]))
+      .map((f) => ({ ...f, round_name: roundInfo({ rounds: c.drive_rounds }, f.round).name }))
+    res.json({ ...withRound(c), feedback: feedbacks.find((f) => f.round === c.round) || null, feedbacks, cv: cv && { name: cv.original_name, size: cv.size, mime: cv.mime, uploaded_at: cv.created_at, source: cv.source } })
   })
 
   r.post('/candidates', async (req, res) => {
@@ -174,15 +195,36 @@ export function hrRoutes() {
   })
 
   r.patch('/candidates/:id/interviewer', async (req, res) => {
-    const { interviewer_id } = z.object({ interviewer_id: uuid.nullable() }).parse(req.body)
-    if (interviewer_id && !(await one('select 1 from interviewers where id = $1 and owner_id = $2', [interviewer_id, owner(req)]))) return res.status(404).json({ error: 'Interviewer not found' })
+    // `force` is HR confirming an assignment the app warned about (interviewer on a break, gone for the day, or at capacity).
+    const { interviewer_id, force } = z.object({ interviewer_id: uuid.nullable(), force: z.boolean().optional() }).parse(req.body)
     const id = uuid.parse(req.params.id)
-    const before = await one('select interviewer_id from candidates where id = $1 and owner_id = $2', [id, owner(req)])
+    const before = await one('select * from candidates where id = $1 and owner_id = $2', [id, owner(req)])
+    if (!before) return res.status(404).json({ error: 'Candidate not found' })
+    if (interviewer_id && interviewer_id !== before.interviewer_id) {
+      const problem = await assignmentProblem(owner(req), interviewer_id, before)
+      if (problem && (problem.status === 404 || !force)) return res.status(problem.status).json({ error: problem.error, code: problem.code })
+    }
     const row = await one('update candidates set interviewer_id = $3, updated_at = now() where id = $1 and owner_id = $2 returning *', [id, owner(req), interviewer_id])
     if (!row) return res.status(404).json({ error: 'Candidate not found' })
     // Tell the candidate who will interview them, when it is a new or changed assignment (not on removal or no-op saves).
     if (interviewer_id && interviewer_id !== before.interviewer_id) await notifyAssigned(owner(req), row, interviewer_id, !!before.interviewer_id)
     res.json(row)
+  })
+
+  // Moves a candidate who finished a round on to the next one: back in the queue, interviewer cleared, feedback kept.
+  r.post('/candidates/:id/advance', async (req, res) => {
+    const b = z.object({ interviewer_id: uuid.optional(), force: z.boolean().optional() }).parse(req.body ?? {})
+    const id = uuid.parse(req.params.id)
+    if (b.interviewer_id) {
+      const c = await one('select * from candidates where id = $1 and owner_id = $2', [id, owner(req)])
+      const problem = c && await assignmentProblem(owner(req), b.interviewer_id, { ...c, interviewer_id: null })
+      if (problem && (problem.status === 404 || !b.force)) return res.status(problem.status).json({ error: problem.error, code: problem.code })
+    }
+    const out = await advanceRound(owner(req), id, { interviewerId: b.interviewer_id })
+    if (out.error) return res.status(out.status).json({ error: out.error })
+    await notifyQueued(owner(req), out.candidate) // "you're through to the next round" with their queue number
+    if (b.interviewer_id) await notifyAssigned(owner(req), out.candidate, b.interviewer_id, false)
+    res.json({ ...out.candidate, round_name: out.to.name, rounds_total: out.to.total })
   })
 
   r.post('/candidates/:id/feedback', async (req, res) => {
@@ -193,8 +235,8 @@ export function hrRoutes() {
     let saved
     try {
       saved = await one(
-        `insert into feedback (owner_id, candidate_id, interviewer_id, rating, recommendation, notes) values ($1,$2,$3,$4,$5,$6) returning *`,
-        [owner(req), c.id, c.interviewer_id, b.rating, b.recommendation, b.notes ?? null])
+        `insert into feedback (owner_id, candidate_id, interviewer_id, round, rating, recommendation, notes) values ($1,$2,$3,$4,$5,$6,$7) returning *`,
+        [owner(req), c.id, c.interviewer_id, c.round, b.rating, b.recommendation, b.notes ?? null])
     } catch (e) { if (e.code === '23505') return res.status(409).json({ error: 'Feedback already recorded' }); throw e }
     // HR is emailed the verdict. A problem preparing that email must never lose the feedback that was just saved.
     const alert = await notifyFeedback(owner(req), c, saved).catch((e) => { console.error('feedback alert failed', e.message); return null })
@@ -208,15 +250,17 @@ export function hrRoutes() {
   r.get('/dashboard', async (req, res) => {
     const driveId = req.query.drive_id ? uuid.parse(req.query.drive_id) : null
     if (driveId && !(await one('select 1 from drives where id = $1 and owner_id = $2', [driveId, owner(req)]))) return res.status(404).json({ error: 'Drive not found' })
-    const [metrics, waiting, pending, recentSync, timeline, interviewing, load, counts] = await Promise.all([
+    const [metrics, waiting, pending, recentSync, timeline, interviewing, load, counts, suggestions] = await Promise.all([
       dashboardMetrics(owner(req), driveId), waitingList(owner(req), driveId, 20), pendingFeedbackList(owner(req), driveId, 20),
       many(`select e.id, e.source, e.outcome, e.message, e.created_at, c.full_name from ingest_events e left join candidates c on c.id = e.candidate_id
             where e.owner_id = $1 and ($2 is null or e.drive_id = $2) and ${LIVE_EVENTS} order by e.created_at desc limit 8`, [owner(req), driveId]),
       registrationsTimeline(owner(req), driveId), nowInterviewing(owner(req), driveId), interviewerLoad(owner(req), driveId),
       one(`select (select count(*) from drives where owner_id = $1) as drives, (select count(*) from interviewers where owner_id = $1) as interviewers,
-                  (select count(*) from candidates where owner_id = $1) as candidates`, [owner(req)])
+                  (select count(*) from candidates where owner_id = $1) as candidates`, [owner(req)]),
+      suggestNext(owner(req), driveId)
     ])
-    res.json({ metrics, waiting, pending_feedback: pending, recent_sync: recentSync, timeline, in_interview: interviewing, interviewer_load: load, setup: counts })
+    const upNext = suggestions.map(({ candidate, interviewer }) => ({ candidate: withRound(candidate), interviewer }))
+    res.json({ metrics, waiting, pending_feedback: pending, recent_sync: recentSync, timeline, in_interview: interviewing, interviewer_load: load, setup: counts, suggestions: upNext })
   })
 
   // ---------- approvals & runs ----------

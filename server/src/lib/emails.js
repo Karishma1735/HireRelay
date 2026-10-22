@@ -1,5 +1,6 @@
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 const when = (d) => (d ? new Date(d).toISOString().slice(0, 10) : 'the scheduled date')
+const roundLine = (r) => (r?.multi ? `Round ${r.number} of ${r.total}: <b>${esc(r.name)}</b>` : '')
 const wrap = (lines) => lines.map((l) => `<p>${l}</p>`).join('')
 
 export function registrationConfirmation(c, drive) {
@@ -37,21 +38,23 @@ export function feedbackReminder(interviewer, items) {
   }
 }
 
-export function queueNumber(c, drive, ahead) {
+export function queueNumber(c, drive, ahead, round) {
   return {
     // The approvals table's purpose list is fixed at creation; queue notices use 'custom'.
     purpose: 'custom', to: c.email,
-    subject: `You're checked in: queue number ${c.queue_number}`,
+    subject: round?.multi && round.number > 1 ? `Next round: ${round.name}, queue number ${c.queue_number}` : `You're checked in: queue number ${c.queue_number}`,
     body: wrap([
       `Hi ${esc(c.full_name)},`,
-      `You're checked in for <b>${esc(drive.name)}</b>. Your queue number is <b style="font-size:1.4em">#${c.queue_number}</b>.`,
+      round?.multi && round.number > 1 ? `Congratulations, you are through to the next round of <b>${esc(drive.name)}</b>.` : `You're checked in for <b>${esc(drive.name)}</b>.`,
+      round?.multi ? `${roundLine(round)}.` : '',
+      `Your queue number is <b style="font-size:1.4em">#${c.queue_number}</b>.`,
       ahead > 0 ? `There ${ahead === 1 ? 'is' : 'are'} ${ahead} ${ahead === 1 ? 'person' : 'people'} ahead of you right now.` : 'You are first in line.',
       `Please stay near ${esc(drive.venue || 'the interview area')} and keep this number handy. We'll call you when it's your turn.`,
-      'Regards,<br>The hiring team'])
+      'Regards,<br>The hiring team'].filter(Boolean))
   }
 }
 
-export function interviewerAssigned(c, drive, interviewer, changed) {
+export function interviewerAssigned(c, drive, interviewer, changed, round) {
   return {
     purpose: 'custom', to: c.email,
     subject: changed ? `Your interviewer has changed: ${interviewer.name}` : `Your interviewer: ${interviewer.name}`,
@@ -59,9 +62,10 @@ export function interviewerAssigned(c, drive, interviewer, changed) {
       `Hi ${esc(c.full_name)},`,
       changed ? `Your interviewer for <b>${esc(drive.name)}</b> has changed. You will now be interviewed by <b>${esc(interviewer.name)}</b>.`
         : `You have been assigned to <b>${esc(interviewer.name)}</b> for your interview at <b>${esc(drive.name)}</b>.`,
+      round?.multi ? `${roundLine(round)}.` : '',
       c.queue_number ? `Your queue number is <b>#${c.queue_number}</b>.` : 'You will receive your queue number when you check in.',
       `Please stay near ${esc(drive.venue || 'the interview area')}. We will call you when it is your turn.`,
-      'Regards,<br>The hiring team'])
+      'Regards,<br>The hiring team'].filter(Boolean))
   }
 }
 
@@ -69,10 +73,10 @@ const ROW_SKIP = new Set(['responseid', 'createtime', 'lastsubmittedtime'])
 const cell = (v, max = 300) => esc(String(v ?? '').slice(0, max))
 
 /** Everything an interviewer needs before meeting a candidate. All text is escaped: form answers come from the public. */
-export function interviewerBriefing(c, drive, interviewer, { cv } = {}) {
+export function interviewerBriefing(c, drive, interviewer, { cv, round, previous = [] } = {}) {
   const facts = [
     ['Role applied for', c.role_applied], ['Experience', c.experience_years != null ? `${c.experience_years} years` : null], ['Current company', c.current_company],
-    ['Email', c.email], ['Phone', c.phone], ['Drive', drive.name], ['Venue', drive.venue], ['Queue number', c.queue_number ? `#${c.queue_number}` : null]
+    ['Interview round', round?.multi ? `${round.number} of ${round.total}: ${round.name}` : null], ['Email', c.email], ['Phone', c.phone], ['Drive', drive.name], ['Venue', drive.venue], ['Queue number', c.queue_number ? `#${c.queue_number}` : null]
   ].filter(([, v]) => v)
   const answers = Object.entries(c.extra || {}).filter(([k, v]) => v && !ROW_SKIP.has(k.toLowerCase())).slice(0, 25)
   const table = (rows) => `<table cellpadding="6" style="border-collapse:collapse;font-size:14px">${rows.map(([k, v]) => `<tr><td style="color:#57534e;vertical-align:top;border-bottom:1px solid #e7e5e4"><b>${esc(String(k).replace(/_/g, ' '))}</b></td><td style="border-bottom:1px solid #e7e5e4">${cell(v)}</td></tr>`).join('')}</table>`
@@ -85,6 +89,7 @@ export function interviewerBriefing(c, drive, interviewer, { cv } = {}) {
       `<b>${esc(c.full_name)}</b> has been assigned to you for <b>${esc(drive.name)}</b>. Here is what we know:`,
       table(facts),
       answers.length ? `<b>Their answers on the registration form</b>${table(answers)}` : '',
+      previous.length ? `<b>What earlier rounds said</b>${table(previous.map((p) => [`${p.round_name} (${p.interviewer || 'interviewer'}): ${p.recommendation}, ${p.rating}/5`, p.notes || 'no notes']))}` : '',
       cv ? `Their CV is attached: <b>${esc(cv.original_name)}</b>.` : 'They did not upload a CV.',
       'Regards,<br>The hiring team'].filter(Boolean))
   }
@@ -98,18 +103,18 @@ const VERDICT = {
 const stars = (n) => '★'.repeat(n) + '☆'.repeat(5 - n)
 
 /** Tells HR what an interviewer decided, with enough about the candidate to act without opening the app. */
-export function feedbackAlert(c, drive, interviewer, fb, { toEmail, appUrl, minutes } = {}) {
+export function feedbackAlert(c, drive, interviewer, fb, { toEmail, appUrl, minutes, round } = {}) {
   const v = VERDICT[fb.recommendation]
   const who = interviewer?.name || 'the interviewer'
   const rows = [
-    ['Candidate', c.full_name], ['Role applied for', c.role_applied], ['Drive', drive.name], ['Interviewer', interviewer?.name || 'not recorded'],
+    ['Candidate', c.full_name], ['Role applied for', c.role_applied], ['Drive', drive.name], ['Round', round?.multi ? `${round.number} of ${round.total}: ${round.name}` : null], ['Interviewer', interviewer?.name || 'not recorded'],
     ['Rating', `${fb.rating}/5  ${stars(fb.rating)}`], ['Email', c.email], ['Phone', c.phone],
     ['Experience', c.experience_years != null ? `${c.experience_years} years` : null], ['Current company', c.current_company],
     ['Interview length', minutes != null ? `${minutes} min` : null]
   ].filter(([, val]) => val)
   return {
     purpose: 'custom', to: toEmail,
-    subject: `${v.label}: ${c.full_name}${c.role_applied ? ` (${c.role_applied})` : ''}, feedback from ${who}`,
+    subject: `${v.label}: ${c.full_name}${c.role_applied ? ` (${c.role_applied})` : ''}, ${round?.multi ? `${round.name} round feedback` : 'feedback'} from ${who}`,
     body: wrap([
       `<span style="font-size:18px;font-weight:bold;color:${v.color}">${esc(v.label)}</span> — ${esc(who)} ${v.phrase} <b>${esc(c.full_name)}</b>.`,
       `<table cellpadding="6" style="border-collapse:collapse;font-size:14px">${rows.map(([k, val]) => `<tr><td style="color:#57534e;border-bottom:1px solid #e7e5e4"><b>${esc(k)}</b></td><td style="border-bottom:1px solid #e7e5e4">${esc(String(val).slice(0, 300))}</td></tr>`).join('')}</table>`,
