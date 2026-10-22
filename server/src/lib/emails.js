@@ -89,3 +89,32 @@ export function interviewerBriefing(c, drive, interviewer, { cv } = {}) {
       'Regards,<br>The hiring team'].filter(Boolean))
   }
 }
+
+const VERDICT = {
+  hire: { label: 'Selected', phrase: 'recommends selecting', color: '#15803d' },
+  hold: { label: 'On hold', phrase: 'wants to put on hold', color: '#b45309' },
+  reject: { label: 'Rejected', phrase: 'recommends rejecting', color: '#b91c1c' }
+}
+const stars = (n) => '★'.repeat(n) + '☆'.repeat(5 - n)
+
+/** Tells HR what an interviewer decided, with enough about the candidate to act without opening the app. */
+export function feedbackAlert(c, drive, interviewer, fb, { toEmail, appUrl, minutes } = {}) {
+  const v = VERDICT[fb.recommendation]
+  const who = interviewer?.name || 'the interviewer'
+  const rows = [
+    ['Candidate', c.full_name], ['Role applied for', c.role_applied], ['Drive', drive.name], ['Interviewer', interviewer?.name || 'not recorded'],
+    ['Rating', `${fb.rating}/5  ${stars(fb.rating)}`], ['Email', c.email], ['Phone', c.phone],
+    ['Experience', c.experience_years != null ? `${c.experience_years} years` : null], ['Current company', c.current_company],
+    ['Interview length', minutes != null ? `${minutes} min` : null]
+  ].filter(([, val]) => val)
+  return {
+    purpose: 'custom', to: toEmail,
+    subject: `${v.label}: ${c.full_name}${c.role_applied ? ` (${c.role_applied})` : ''}, feedback from ${who}`,
+    body: wrap([
+      `<span style="font-size:18px;font-weight:bold;color:${v.color}">${esc(v.label)}</span> — ${esc(who)} ${v.phrase} <b>${esc(c.full_name)}</b>.`,
+      `<table cellpadding="6" style="border-collapse:collapse;font-size:14px">${rows.map(([k, val]) => `<tr><td style="color:#57534e;border-bottom:1px solid #e7e5e4"><b>${esc(k)}</b></td><td style="border-bottom:1px solid #e7e5e4">${esc(String(val).slice(0, 300))}</td></tr>`).join('')}</table>`,
+      fb.notes ? `<b>Interviewer's notes</b><br>${esc(fb.notes).replace(/\n/g, '<br>')}` : '<i>No notes were added.</i>',
+      appUrl ? `Decide next steps in HireRelay: <a href="${esc(appUrl)}/candidates">open Candidates</a>.` : 'Open HireRelay to mark the candidate Selected or Rejected.',
+      'This alert was sent automatically by HireRelay.'])
+  }
+}

@@ -119,7 +119,8 @@ function CandidateModal({ id, onClose }) {
   const qc = useQueryClient()
   const c = useQuery({ queryKey: ['candidate', id], queryFn: () => get(`/candidates/${id}`) })
   const [fb, setFb] = useState({ rating: 3, recommendation: 'hold', notes: '' }); const [error, setError] = useState('')
-  const save = useMutation({ mutationFn: () => post(`/candidates/${id}/feedback`, fb), onSuccess: () => qc.invalidateQueries({ queryKey: ['candidate', id] }), onError: (e) => setError(e.message) })
+  const [note, setNote] = useState('')
+  const save = useMutation({ mutationFn: () => post(`/candidates/${id}/feedback`, fb), onSuccess: (r) => { setNote(r.alert?.sent ? `Saved. HR was emailed this verdict at ${r.alert.to}.` : 'Saved.'); qc.invalidateQueries({ queryKey: ['candidate', id] }); qc.invalidateQueries({ queryKey: ['approvals'] }) }, onError: (e) => setError(e.message) })
   const d = c.data
   return (
     <Modal title={d?.full_name || 'Candidate'} onClose={onClose}>
@@ -134,7 +135,7 @@ function CandidateModal({ id, onClose }) {
         <CvSection id={id} cv={d.cv} />
         <div className="border-t pt-4">
           <h4 className="mb-2 font-semibold">Interview feedback</h4>
-          {d.feedback ? (<div className="rounded-lg bg-emerald-50 p-3"><div>Rating <b>{d.feedback.rating}/5</b> · <b className="capitalize">{d.feedback.recommendation}</b></div>{d.feedback.notes && <p className="mt-1 text-slate-700">{d.feedback.notes}</p>}</div>)
+          {d.feedback ? (<div className="rounded-lg bg-emerald-50 p-3"><div>Rating <b>{d.feedback.rating}/5</b> · <b className="capitalize">{d.feedback.recommendation}</b></div>{d.feedback.notes && <p className="mt-1 text-slate-700">{d.feedback.notes}</p>}{note && <p className="mt-2 text-xs text-emerald-700">{note}</p>}</div>)
             : !d.interview_completed_at ? <p className="text-slate-500">Feedback can be recorded once the interview is completed.</p>
             : (<form className="space-y-3" onSubmit={(e) => { e.preventDefault(); setError(''); save.mutate() }}>
               <div className="grid grid-cols-2 gap-3">

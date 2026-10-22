@@ -1,5 +1,6 @@
 import { one } from '../db.js'
-import { queueNumber, interviewerAssigned, interviewerBriefing } from './emails.js'
+import { queueNumber, interviewerAssigned, interviewerBriefing, feedbackAlert } from './emails.js'
+import { config, isPublicUrl } from '../config.js'
 import { cvOf } from './files.js'
 import { requestApproval, approveAndExecute } from './approvals.js'
 import { getSettings } from './settings.js'
@@ -45,4 +46,24 @@ export async function notifyAssigned(ownerId, candidate, interviewerId, changed)
     await send(interviewerBriefing(candidate, drive, interviewer, { cv }), `Briefing for ${interviewer.name}: ${candidate.full_name}${cv ? ' (CV attached)' : ''}`, settings.auto_send_interviewer_briefing)
   }
   return toCandidate
+}
+
+/**
+ * Feedback was recorded: email HR the interviewer's verdict. It goes to the address HR chose in settings, or to the
+ * account's own address. It is sent straight away (an alert to HR needs no approval) and logged like every other send.
+ * Returns what happened, so the screen can say so.
+ */
+export async function notifyFeedback(ownerId, candidate, feedback) {
+  const settings = await getSettings(ownerId)
+  if (!settings.email_feedback_alerts) return { sent: false, reason: 'off' }
+  const to = settings.notify_email || (await one('select email from users where id = $1', [ownerId]))?.email
+  if (!to) return { sent: false, reason: 'no address' }
+  const [drive, interviewer] = await Promise.all([
+    one('select * from drives where id = $1 and owner_id = $2', [candidate.drive_id, ownerId]),
+    feedback.interviewer_id ? one('select * from interviewers where id = $1 and owner_id = $2', [feedback.interviewer_id, ownerId]) : null])
+  const minutes = candidate.interview_started_at && candidate.interview_completed_at ? Math.max(0, Math.round((Date.parse(candidate.interview_completed_at) - Date.parse(candidate.interview_started_at)) / 60000)) : null
+  const email = feedbackAlert(candidate, drive, interviewer, feedback, { toEmail: to, appUrl: isPublicUrl(config.publicUrl) ? config.publicUrl : null, minutes })
+  const approval = await requestApproval(ownerId, { email, candidateId: candidate.id, requestedBy: 'system', title: `Feedback alert: ${candidate.full_name} (${feedback.recommendation})` })
+  approveAndExecute(ownerId, approval.id).catch((e) => console.error('feedback alert failed', e.message))
+  return { sent: true, to }
 }

@@ -178,6 +178,8 @@ create table if not exists settings (
   auto_queue_on_check_in integer not null default 1,
   auto_send_queue_emails integer not null default 1,
   auto_send_assignment_emails integer not null default 1,
-  auto_send_interviewer_briefing integer not null default 1
+  auto_send_interviewer_briefing integer not null default 1,
+  email_feedback_alerts integer not null default 1,
+  notify_email text
 );
 

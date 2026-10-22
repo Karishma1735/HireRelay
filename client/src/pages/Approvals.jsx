@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { get, post, put } from '../lib/api.js'
 import { ago } from '../lib/format.js'
+import { useAuth } from '../lib/auth.jsx'
 import { Alert, Badge, Button, Card, Empty, Spinner } from '../components/ui.jsx'
 
 const TONE = { pending: 'amber', approved: 'indigo', executed: 'green', rejected: 'slate', failed: 'red', success: 'green', running: 'amber', created: 'green', duplicate: 'amber', rejected_: 'red', error: 'red' }
@@ -12,6 +13,8 @@ export default function Approvals() {
   const approvals = useQuery({ queryKey: ['approvals', tab], queryFn: () => get(tab === 'pending' ? '/approvals?status=pending' : '/approvals'), enabled: tab !== 'runs' && tab !== 'sync', refetchInterval: 8000 })
   const runs = useQuery({ queryKey: ['runs'], queryFn: () => get('/runs'), enabled: tab === 'runs', refetchInterval: 8000 })
   const sync = useQuery({ queryKey: ['ingest-events'], queryFn: () => get('/ingest-events'), enabled: tab === 'sync', refetchInterval: 8000 })
+  const { session } = useAuth()
+  const [addr, setAddr] = useState(null) // the alert address being typed; null = show the saved one
   const [pending, setPending] = useState({}) // switches flip instantly; the server value takes over once saved
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => get('/settings') })
   const act = useMutation({ mutationFn: ({ id, what }) => post(`/approvals/${id}/${what}`), onSuccess: refresh, onError: (e) => setError(e.message) })
@@ -34,10 +37,15 @@ export default function Approvals() {
           <div className="flex flex-col gap-1.5 text-sm text-slate-600">
             {[['auto_queue_on_check_in', 'Add to queue automatically on check-in', 'Checking someone in puts them straight into the queue and gives them a queue number.'],
               ['auto_send_queue_emails', 'Auto-send the queue-number email', 'The candidate is emailed their queue number the moment they join the queue, without waiting for approval.'],
+              ['email_feedback_alerts', 'Email me when an interviewer\'s feedback is recorded', 'You get the candidate\'s details and the verdict (selected, on hold or rejected) with the interviewer\'s notes, straight away.'],
               ['auto_send_interviewer_briefing', 'Auto-send the candidate briefing (with CV) to the interviewer', 'When you assign an interviewer, they are emailed the candidate\'s details, form answers and CV without waiting for approval.'],
               ['auto_send_assignment_emails', 'Auto-send an email when an interviewer is assigned', 'The candidate is told who will interview them as soon as you assign or change the interviewer.'],
               ['auto_send_confirmations', 'Auto-send registration confirmations', 'Registration confirmations are sent without waiting for approval. Reminders always need approval.']].map(([k, label, hint]) => (
               <label key={k} className="flex items-center gap-2" title={hint}><input type="checkbox" checked={!!(pending[k] ?? settings.data?.[k])} disabled={!settings.data} onChange={(e) => { setPending((p) => ({ ...p, [k]: e.target.checked })); auto.mutate({ [k]: e.target.checked }) }} /> {label}</label>))}
+            <label className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-600">Send feedback alerts to
+              <input className="input !w-64 !py-1" type="email" placeholder={session?.user?.email || 'your email'} value={addr ?? settings.data?.notify_email ?? ''} disabled={!settings.data}
+                onChange={(e) => setAddr(e.target.value)} onBlur={() => { if (addr !== null && addr !== (settings.data?.notify_email ?? '')) auto.mutate({ notify_email: addr }, { onSettled: () => setAddr(null) }) }} aria-label="Send feedback alerts to" />
+              <span className="text-xs text-slate-400">{settings.data?.notify_email ? '' : 'blank = your account email'}</span></label>
           </div>
         </div>
       </Card>

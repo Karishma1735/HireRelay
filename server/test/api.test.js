@@ -660,3 +660,63 @@ test('assigning an interviewer briefs them with the details, the form answers an
     const failed = await t.a('POST', `/api/approvals/${stuck.id}/approve`); assert.equal(failed.body.status, 'failed'); assert.match(failed.body.error, /HIRERELAY_PUBLIC_URL/)
   } finally { globalThis.fetch = realFetch; delete process.env.HIRERELAY_PUBLIC_URL; await t.a('PUT', '/api/settings', { auto_send_interviewer_briefing: true }); await query('delete from viasocket_connections') }
 })
+
+// ---------- feedback alerts to HR ----------
+test('recording feedback emails HR the verdict, the candidate and the interviewer, and the switches work', async () => {
+  const { query } = await import('../src/db.js')
+  const alertsFor = async (cid) => (await query(`select * from approvals where candidate_id = $1 and title like 'Feedback alert%' order by created_at`, [cid])).rows
+  const finish = async (name, ivId) => {
+    const c = (await t.a('POST', '/api/candidates', { drive_id: drive.id, full_name: name, email: `${name.replace(/\s/g, '').toLowerCase()}@example.com`, role_applied: 'Support Executive' })).body
+    if (ivId) await t.a('PATCH', `/api/candidates/${c.id}/interviewer`, { interviewer_id: ivId })
+    for (const s of ['checked_in', 'in_interview', 'completed']) await t.a('POST', `/api/candidates/${c.id}/stage`, { stage: s, ...(s === 'in_interview' && ivId ? { interviewer_id: ivId } : {}) })
+    return c
+  }
+  const settle = async (cid) => { for (let i = 0; i < 30; i++) { const a = (await alertsFor(cid))[0]; if (a && !['pending', 'approved'].includes(a.status)) return a; await new Promise((r) => setTimeout(r, 100)) } }
+  const iv = (await t.a('POST', '/api/interviewers', { name: 'Alert Panelist', email: 'alertp@hr.test' })).body
+  assert.deepEqual([(await t.a('GET', '/api/settings')).body.email_feedback_alerts, (await t.a('GET', '/api/settings')).body.notify_email], [true, null])
+
+  // the three verdicts, to the account's own address by default
+  for (const [rec, label, phrase] of [['hire', 'Selected', 'recommends selecting'], ['hold', 'On hold', 'wants to put on hold'], ['reject', 'Rejected', 'recommends rejecting']]) {
+    const c = await finish(`Alert ${rec}`, iv.id)
+    const res = await t.a('POST', `/api/candidates/${c.id}/feedback`, { rating: 4, recommendation: rec, notes: `Notes for ${rec}` })
+    assert.equal(res.status, 201); assert.deepEqual(res.body.alert, { sent: true, to: 'a@hr.test' })
+    const mail = (await alertsFor(c.id))[0]
+    assert.equal(mail.payload.to, 'a@hr.test'); assert.match(mail.payload.subject, new RegExp(`^${label}: Alert ${rec} \\(Support Executive\\), feedback from Alert Panelist`))
+    for (const needle of [phrase, 'Alert Panelist', `Alert ${rec}`, '4/5', '★★★★☆', `Notes for ${rec}`, 'Support Executive', 'alert' + rec + '@example.com']) assert.ok(mail.payload.body.includes(needle), `${rec}: ${needle}`)
+    const done = await settle(c.id)
+    assert.equal(done.status, 'failed'); assert.match(done.error, /Gmail is not connected/)           // sent immediately, and failing honestly with no Gmail
+  }
+  // hostile notes cannot inject markup; no interviewer assigned still alerts
+  const lone = await finish('Alert Lone', iv.id)
+  await t.a('PATCH', `/api/candidates/${lone.id}/interviewer`, { interviewer_id: null }) // interview done, then the assignment was removed
+  await t.a('POST', `/api/candidates/${lone.id}/feedback`, { rating: 1, recommendation: 'reject', notes: '<img src=x onerror=alert(1)>\nsecond line' })
+  const body = (await alertsFor(lone.id))[0].payload.body
+  assert.ok(!body.includes('<img') && body.includes('&lt;img') && body.includes('second line')); assert.match(body, /not recorded/); assert.match((await alertsFor(lone.id))[0].payload.subject, /feedback from the interviewer/)
+  // a second feedback for the same candidate is refused and sends nothing more
+  assert.equal((await t.a('POST', `/api/candidates/${lone.id}/feedback`, { rating: 5, recommendation: 'hire' })).status, 409); assert.equal((await alertsFor(lone.id)).length, 1)
+  // another address; bad addresses refused; blank goes back to the account address
+  assert.equal((await t.a('PUT', '/api/settings', { notify_email: 'not-an-email' })).status, 400)
+  assert.equal((await t.a('PUT', '/api/settings', { notify_email: 'boss@company.test' })).body.notify_email, 'boss@company.test')
+  const c2 = await finish('Alert Other Address', iv.id); const r2 = await t.a('POST', `/api/candidates/${c2.id}/feedback`, { rating: 3, recommendation: 'hold' })
+  assert.equal(r2.body.alert.to, 'boss@company.test'); assert.equal((await alertsFor(c2.id))[0].payload.to, 'boss@company.test')
+  assert.equal((await t.b('GET', '/api/settings')).body.notify_email, null)                                   // other users unaffected
+  assert.equal((await t.a('PUT', '/api/settings', { notify_email: '' })).body.notify_email, null)
+  // switch off: feedback is still saved, nobody is emailed
+  await t.a('PUT', '/api/settings', { email_feedback_alerts: false })
+  const c3 = await finish('Alert Silent', iv.id); const r3 = await t.a('POST', `/api/candidates/${c3.id}/feedback`, { rating: 5, recommendation: 'hire' })
+  assert.deepEqual([r3.status, r3.body.alert], [201, { sent: false, reason: 'off' }]); assert.equal((await alertsFor(c3.id)).length, 0)
+  assert.ok((await t.a('GET', `/api/candidates/${c3.id}`)).body.feedback)
+  await t.a('PUT', '/api/settings', { email_feedback_alerts: true })
+
+  // with Gmail connected the email really goes to HR, and counts as sent only with a message id
+  await query(`insert into viasocket_connections (owner_id, service_id, auth_id, script_id, config) values ($1,'rowo0bqrhj5g','auth_rowo0bqrhj5g','scriALERT',$2)`, [t.users.a.id, { from: 'me@example.com' }])
+  const realFetch = globalThis.fetch; const sent = []
+  globalThis.fetch = async (url, init) => String(url).includes('/func/scriALERT') ? (sent.push(JSON.parse(init.body).inputData), new Response(JSON.stringify({ success: true, data: { id: 'g1', labelIds: ['SENT'] } }), { status: 200 })) : realFetch(url, init)
+  try {
+    const c4 = await finish('Alert Delivered', iv.id); await t.a('POST', `/api/candidates/${c4.id}/feedback`, { rating: 5, recommendation: 'hire', notes: 'Great' })
+    const done = await settle(c4.id)
+    assert.equal(done.status, 'executed')
+    const alerts = sent.filter((g) => g.to === 'a@hr.test'); assert.equal(alerts.length, 1)      // the queue / assignment mails for this candidate go to other people
+    assert.equal(alerts[0].from, 'me@example.com'); assert.match(alerts[0].subject, /^Selected: Alert Delivered/); assert.match(alerts[0].messageBody, /Great/)
+  } finally { globalThis.fetch = realFetch; await query('delete from viasocket_connections') }
+})

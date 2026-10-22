@@ -8,10 +8,10 @@ import { dashboardMetrics, waitingList, pendingFeedbackList, registrationsTimeli
 import { approveAndExecute, requestApproval, retry } from '../lib/approvals.js'
 import { interviewReminder, feedbackReminder } from '../lib/emails.js'
 import { afterCandidateCreated } from './public.js'
-import { getSettings } from '../lib/settings.js'
+import { getSettings, saveSettings, BOOLEAN_SETTINGS } from '../lib/settings.js'
 import { cvOf, saveCv, removeCv, readMultipart, detectType, CV_TYPE_MESSAGE } from '../lib/files.js'
 import { sendFile } from './files.js'
-import { notifyQueued, notifyAssigned } from '../lib/queue.js'
+import { notifyQueued, notifyAssigned, notifyFeedback } from '../lib/queue.js'
 
 const uuid = z.string().uuid()
 const opt = (s) => s.optional().nullable().or(z.literal('').transform(() => null))
@@ -190,11 +190,15 @@ export function hrRoutes() {
     const c = await one('select * from candidates where id = $1 and owner_id = $2', [uuid.parse(req.params.id), owner(req)])
     if (!c) return res.status(404).json({ error: 'Candidate not found' })
     if (!c.interview_completed_at) return res.status(409).json({ error: 'Feedback can be recorded after the interview is completed' })
+    let saved
     try {
-      res.status(201).json(await one(
+      saved = await one(
         `insert into feedback (owner_id, candidate_id, interviewer_id, rating, recommendation, notes) values ($1,$2,$3,$4,$5,$6) returning *`,
-        [owner(req), c.id, c.interviewer_id, b.rating, b.recommendation, b.notes ?? null]))
+        [owner(req), c.id, c.interviewer_id, b.rating, b.recommendation, b.notes ?? null])
     } catch (e) { if (e.code === '23505') return res.status(409).json({ error: 'Feedback already recorded' }); throw e }
+    // HR is emailed the verdict. A problem preparing that email must never lose the feedback that was just saved.
+    const alert = await notifyFeedback(owner(req), c, saved).catch((e) => { console.error('feedback alert failed', e.message); return null })
+    res.status(201).json({ ...saved, alert })
   })
 
   // A sync event belongs on screen only while its candidate exists; rejected/error events never had one.
@@ -277,13 +281,9 @@ export function hrRoutes() {
   // ---------- settings ----------
   r.get('/settings', async (req, res) => res.json(await getSettings(owner(req))))
   r.put('/settings', async (req, res) => {
-    const b = z.object({ auto_send_confirmations: z.boolean().optional(), auto_queue_on_check_in: z.boolean().optional(), auto_send_queue_emails: z.boolean().optional(), auto_send_assignment_emails: z.boolean().optional(), auto_send_interviewer_briefing: z.boolean().optional() }).parse(req.body)
-    const cur = { ...(await getSettings(owner(req))), ...b }
-    await query(
-      `insert into settings (owner_id, auto_send_confirmations, auto_queue_on_check_in, auto_send_queue_emails, auto_send_assignment_emails, auto_send_interviewer_briefing) values ($1,$2,$3,$4,$5,$6)
-       on conflict (owner_id) do update set auto_send_confirmations = $2, auto_queue_on_check_in = $3, auto_send_queue_emails = $4, auto_send_assignment_emails = $5, auto_send_interviewer_briefing = $6`,
-      [owner(req), cur.auto_send_confirmations, cur.auto_queue_on_check_in, cur.auto_send_queue_emails, cur.auto_send_assignment_emails, cur.auto_send_interviewer_briefing])
-    res.json(cur)
+    const shape = Object.fromEntries(Object.keys(BOOLEAN_SETTINGS).map((k) => [k, z.boolean().optional()]))
+    const b = z.object({ ...shape, notify_email: z.string().trim().email().max(200).nullable().optional().or(z.literal('').transform(() => null)) }).parse(req.body)
+    res.json(await saveSettings(owner(req), Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined))))
   })
   return r
 }
