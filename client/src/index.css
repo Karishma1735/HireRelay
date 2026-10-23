@@ -2,7 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer components {
-  .input { @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:bg-slate-100; }
-  .label { @apply mb-1 block text-xs font-medium text-slate-600; }
+@layer base {
+  body { font-feature-settings: 'ss01', 'cv11'; letter-spacing: -0.003em; }
+  h1, h2, h3 { letter-spacing: -0.02em; }
+  input[type='checkbox'], input[type='radio'] { accent-color: #2F5BFF; }
+  ::selection { background: #C7D4FF; }
+  :focus-visible { outline: 2px solid #2F5BFF; outline-offset: 2px; }
 }
+
+@layer components {
+  .input { @apply h-9 w-full rounded-lg bg-white px-3 text-sm text-ink-900 shadow-card ring-1 ring-inset ring-slate-200 placeholder:text-slate-400 transition focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-slate-100; }
+  textarea.input { @apply h-auto py-2; }
+  select.input { @apply appearance-none bg-[length:16px] bg-[right_0.5rem_center] bg-no-repeat pr-8; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237C879B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); }
+  .label { @apply mb-1.5 block text-[13px] font-medium text-slate-700; }
+  .mono { font-family: 'Geist Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+}
+
+@media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; transition-duration: .01ms !important; } }

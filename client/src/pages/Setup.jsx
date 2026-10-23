@@ -13,7 +13,7 @@ export default function Setup({ standalone }) {
   const items = data?.setup?.items || []
   return (
     <div className={standalone ? 'mx-auto max-w-2xl p-4 sm:p-8' : ''}>
-      <h1 className="mb-1 text-2xl font-semibold">Setup</h1>
+      <h1 className="mb-1 text-[24px] font-semibold tracking-tight">Setup</h1>
       <p className="mb-5 text-sm text-slate-500">Nothing below is faked: a feature that needs a missing value stays off and says why. Values are never shown here, only whether they are set.</p>
       <div className="space-y-4">
         {Object.entries(GROUPS).map(([g, [title, help]]) => (

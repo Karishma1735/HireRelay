@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Radio, CheckCircle2 } from 'lucide-react'
+import { Workflow, CheckCircle2 } from 'lucide-react'
 import { Alert, Button, Field, Spinner } from '../components/ui.jsx'
 
 const MAX_CV = 5 * 1024 * 1024
@@ -35,12 +35,12 @@ export default function Apply() {
   const d = drive.data
   return (
     <div className="mx-auto max-w-lg p-4 sm:py-10">
-      <div className="mb-4 flex items-center gap-2 font-bold text-indigo-700"><Radio className="h-5 w-5" /> HireRelay</div>
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-        <h1 className="text-xl font-semibold">{d.name}</h1>
+      <div className="mb-5 flex items-center gap-2.5 font-semibold"><span className="flex h-7 w-7 items-center justify-center rounded-[7px] bg-ink-900 text-white"><Workflow className="h-4 w-4" /></span> HireRelay</div>
+      <div className="rounded-xl bg-white p-5 shadow-pop ring-1 ring-slate-200 sm:p-7">
+        <h1 className="text-[24px] font-semibold tracking-tight">{d.name}</h1>
         <p className="mb-4 mt-1 text-sm text-slate-500">{[d.role_title, d.venue, d.drive_date].filter(Boolean).join(' · ')}</p>
         {state.done ? (
-          <div className="space-y-2 py-6 text-center"><CheckCircle2 className="mx-auto h-10 w-10 text-emerald-600" /><p className="font-medium">You&apos;re registered.</p><p className="text-sm text-slate-500">Check in at the registration desk when you arrive.</p></div>
+          <div className="space-y-2 py-6 text-center"><CheckCircle2 className="mx-auto h-10 w-10 text-brand-600" /><p className="font-medium">You&apos;re registered.</p><p className="text-sm text-slate-500">Check in at the registration desk when you arrive.</p></div>
         ) : (
           <form onSubmit={submit} className="space-y-3">
             <Field label="Full name *"><input className="input" required minLength={2} value={f.full_name} onChange={set('full_name')} /></Field>
@@ -55,14 +55,14 @@ export default function Apply() {
               <Field label="Current company"><input className="input" value={f.current_company} onChange={set('current_company')} /></Field>
             </div>
             <Field label="Upload your CV (optional)">
-              <input className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-indigo-700 hover:file:bg-indigo-100" type="file" accept=".pdf,.doc,.docx,application/pdf" onChange={pickCv} />
+              <input className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-[7px] file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-brand-700 hover:file:bg-brand-100" type="file" accept=".pdf,.doc,.docx,application/pdf" onChange={pickCv} />
             </Field>
             <p className="-mt-1 text-xs text-slate-500">PDF, DOC or DOCX, up to 5 MB. {cv && <b className="text-slate-700">{cv.name} ({Math.max(1, Math.round(cv.size / 1024))} KB)</b>}</p>
             {cvError && <Alert>{cvError}</Alert>}
             <input className="hidden" tabIndex={-1} autoComplete="off" aria-hidden="true" value={f.website} onChange={set('website')} name="website" />
             {state.error && <Alert>{state.error}</Alert>}
             <p className="text-xs text-slate-500">Your details{cv ? ' and CV' : ''} are shared only with the hiring team and the interviewer assigned to you.</p>
-            <Button className="w-full" loading={state.busy} disabled={!!cvError}>{state.busy && cv ? 'Uploading…' : 'Register'}</Button>
+            <Button variant="accent" className="w-full !h-10 !text-sm" loading={state.busy} disabled={!!cvError}>{state.busy && cv ? 'Uploading…' : 'Register'}</Button>
           </form>
         )}
       </div>

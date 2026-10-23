@@ -60,7 +60,7 @@ export default function Interviewers() {
   const pause = useMutation({ mutationFn: (i) => patch(`/interviewers/${i.id}`, { availability: i.availability === 'on_break' ? 'available' : 'on_break' }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['interviewers'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }) } })
   return (
     <div className="space-y-4">
-      <div><h1 className="text-2xl font-semibold">Interviewers</h1><p className="text-sm text-slate-500">Your panel. Open an interviewer to see everyone assigned to them. An email lets HireRelay prepare pending-feedback reminders.</p></div>
+      <div><h1 className="text-[24px] font-semibold tracking-tight">Interviewers</h1><p className="text-sm text-slate-500">Your panel. Open an interviewer to see everyone assigned to them. An email lets HireRelay prepare pending-feedback reminders.</p></div>
       <Card title="Add interviewer">
         <form className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end" onSubmit={(e) => { e.preventDefault(); add.mutate() }}>
           <Field label="Name"><input className="input" required minLength={2} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
@@ -70,14 +70,14 @@ export default function Interviewers() {
       </Card>
       {!list.data?.length ? <Card><Empty>No interviewers yet. Add your first panelist above.</Empty></Card> : (
         <div className="grid gap-3 md:grid-cols-2">{list.data.map((i) => (
-          <Link key={i.id} to={`/interviewers/${i.id}`} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-indigo-300">
+          <Link key={i.id} to={`/interviewers/${i.id}`} className="rounded-[10px] border border-slate-200 bg-white p-4 shadow-card transition hover:border-brand-300">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0"><h3 className="truncate font-semibold">{i.name}</h3><p className="truncate text-sm text-slate-500">{i.email || 'no email'}</p></div>
               <AvailabilityBadge i={i} />
             </div>
             <div className="mt-3"><InterviewerStats i={i} />{i.capacity && <p className="mt-1 text-xs text-slate-500">Limit: {i.capacity} candidates per drive</p>}</div>
             <div className="mt-3 flex items-center justify-between">
-              <span className="text-xs text-indigo-600">View candidates →</span>
+              <span className="text-xs text-brand-600">View candidates →</span>
               <div className="flex gap-1.5">
                 {i.active && <Button size="sm" variant="secondary" onClick={(e) => { e.preventDefault(); e.stopPropagation(); pause.mutate(i) }}>{i.availability === 'on_break' ? 'Back from break' : 'Break'}</Button>}
                 <Button size="sm" variant="secondary" onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggle.mutate(i) }}>{i.active ? 'Deactivate' : 'Activate'}</Button></div>

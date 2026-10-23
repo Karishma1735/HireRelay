@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Bot, Send, ShieldCheck } from 'lucide-react'
+import { Sparkles, Send, ShieldCheck } from 'lucide-react'
 import { get, post } from '../lib/api.js'
 import { Alert } from '../components/ui.jsx'
 
@@ -51,13 +51,13 @@ export default function Agent() {
   return (
     <div className="flex h-[calc(100vh-6rem)] flex-col lg:h-[calc(100vh-4rem)]">
       <header className="mb-3 flex items-center gap-3">
-        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-600 text-white"><Bot className="h-5 w-5" /></span>
+        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-ink-800 text-white"><Sparkles className="h-4 w-4" /></span>
         <div><h1 className="text-lg font-semibold leading-tight">AI operations agent</h1>
           <p className="text-xs text-slate-500">{ask.isPending ? 'typing…' : 'Answers from your live data. Anything it proposes waits for your approval.'}</p></div>
       </header>
       {blocked && <Alert tone="warn">The agent runs on viaSocket AI and needs <code>{vs.data.missing.join(', ')}</code> in the server settings. See <Link className="underline" to="/setup">Setup</Link>.</Alert>}
 
-      <div ref={scroller} className="mt-2 flex-1 overflow-y-auto rounded-xl border border-slate-200 bg-slate-100/70 px-3 py-4 sm:px-5" role="log" aria-live="polite" aria-label="Conversation">
+      <div ref={scroller} className="mt-2 flex-1 overflow-y-auto rounded-[10px] border border-slate-200 bg-[#F1F3F7] px-3 py-4 sm:px-5" role="log" aria-live="polite" aria-label="Conversation">
         {/* min-h-full + a growing spacer pins short conversations to the bottom, and the list still scrolls normally when long. */}
         <div className="flex min-h-full flex-col gap-1.5">
           <div className="flex-1" />
@@ -74,7 +74,7 @@ export default function Agent() {
               <div key={i} className="contents">
                 {newDay && m.at && <span className="my-2 self-center rounded-full bg-white px-3 py-0.5 text-xs text-slate-500 shadow-sm">{dayLabel(m.at)}</span>}
                 {m.role === 'error' ? <div className="max-w-[85%] self-start"><Alert>{m.text}</Alert></div> : (
-                  <div className={`w-fit max-w-[85%] rounded-2xl px-3.5 py-2 text-sm shadow-sm sm:max-w-[75%] ${mine ? 'self-end rounded-tr-sm bg-indigo-600 text-white' : 'self-start rounded-tl-sm bg-white text-slate-800'} ${sameSender ? '' : 'mt-1.5'}`}>
+                  <div className={`w-fit max-w-[85%] rounded-2xl px-3.5 py-2 text-sm shadow-sm sm:max-w-[75%] ${mine ? 'self-end rounded-tr-sm bg-brand-600 text-white shadow-sm' : 'self-start rounded-tl-sm bg-white text-ink-900 ring-1 ring-slate-200'} ${sameSender ? '' : 'mt-1.5'}`}>
                     <p className="whitespace-pre-wrap break-words">{m.text}</p>
                     {m.recs?.length > 0 && <ul className="mt-2 list-disc space-y-0.5 pl-5 text-slate-700">{m.recs.map((r, j) => <li key={j}>{r}</li>)}</ul>}
                     {m.queued?.length > 0 && (
@@ -83,7 +83,7 @@ export default function Agent() {
                         <ul className="mt-1">{m.queued.map((q) => <li key={q.id}>{q.title}</li>)}</ul>
                         <Link to="/approvals" className="mt-1 inline-block font-medium underline">Review & approve</Link>
                       </div>)}
-                    {m.at && <div className={`mt-0.5 text-right text-[10px] leading-none ${mine ? 'text-indigo-200' : 'text-slate-400'}`}>{clock(m.at)}</div>}
+                    {m.at && <div className={`mt-0.5 text-right text-[10px] leading-none ${mine ? 'text-brand-200' : 'text-slate-400'}`}>{clock(m.at)}</div>}
                   </div>)}
               </div>)
           })}
@@ -95,14 +95,14 @@ export default function Agent() {
       </div>
 
       {!msgs.length && !loadingHistory && !blocked && (
-        <div className="mt-2 flex gap-2 overflow-x-auto pb-1">{SUGGESTIONS.map((s) => <button key={s} onClick={() => send(s)} className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">{s}</button>)}</div>)}
+        <div className="mt-2 flex gap-2 overflow-x-auto pb-1">{SUGGESTIONS.map((s) => <button key={s} onClick={() => send(s)} className="shrink-0 rounded-full bg-white px-3 py-1.5 text-sm text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50">{s}</button>)}</div>)}
 
       <form className="mt-2 flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); send() }}>
-        <textarea ref={input} rows={1} className="max-h-32 min-h-[44px] flex-1 resize-none rounded-3xl border border-slate-300 bg-white px-4 py-2.5 text-sm shadow-sm placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:bg-slate-100"
+        <textarea ref={input} rows={1} className="max-h-32 min-h-[44px] flex-1 resize-none rounded-[10px] bg-white px-4 py-2.5 text-sm shadow-card ring-1 ring-inset ring-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-slate-100"
           placeholder="Type a message" value={text} disabled={blocked} aria-label="Message"
           onChange={(e) => { setText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 128)}px` }}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); e.currentTarget.style.height = 'auto' } }} />
-        <button type="submit" aria-label="Send" disabled={blocked || !text.trim() || ask.isPending} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white shadow-sm transition hover:bg-indigo-700 disabled:bg-indigo-300"><Send className="h-5 w-5" /></button>
+        <button type="submit" aria-label="Send" disabled={blocked || !text.trim() || ask.isPending} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[10px] bg-brand-600 text-white shadow-btn transition hover:bg-brand-700 disabled:opacity-50"><Send className="h-5 w-5" /></button>
       </form>
     </div>
   )

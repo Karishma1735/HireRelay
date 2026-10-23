@@ -29,7 +29,7 @@ export default function Approvals() {
   const tabs = [['pending', 'Awaiting approval'], ['all', 'All approvals'], ['runs', 'Workflow executions'], ['sync', 'Form sync log']]
   return (
     <div className="space-y-4">
-      <div><h1 className="text-2xl font-semibold">Approvals & activity</h1><p className="text-sm text-slate-500">Emails to candidates and interviewers are queued here. Nothing is sent until you approve it; then it runs through viaSocket and the real result is logged.</p></div>
+      <div><h1 className="text-[24px] font-semibold tracking-tight">Approvals & activity</h1><p className="text-sm text-slate-500">Emails to candidates and interviewers are queued here. Nothing is sent until you approve it; then it runs through viaSocket and the real result is logged.</p></div>
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap gap-2"><Button size="sm" variant="secondary" loading={prep.isPending && prep.variables === 'interview_reminders'} onClick={() => prep.mutate('interview_reminders')}>Prepare interview reminders</Button>
@@ -50,25 +50,25 @@ export default function Approvals() {
         </div>
       </Card>
       {error && <Alert tone="warn">{error}</Alert>}
-      <div className="flex gap-1 overflow-x-auto border-b border-slate-200">{tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium ${tab === k ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'}`}>{l}</button>)}</div>
+      <div className="flex gap-1 overflow-x-auto border-b border-slate-200">{tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium ${tab === k ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'}`}>{l}</button>)}</div>
       {tab === 'runs' ? (runs.isLoading ? <Spinner /> : !runs.data.length ? <Empty>No workflow has run yet.</Empty> : (
         <ul className="space-y-2">{runs.data.map((r) => (
-          <li key={r.id} className="rounded-xl border border-slate-200 bg-white p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{r.title || r.kind}</span><span className="flex items-center gap-2"><Badge tone={TONE[r.status]}>{r.status}</Badge><span className="text-xs text-slate-400">{ago(r.started_at)}</span></span></div>
+          <li key={r.id} className="rounded-[10px] border border-slate-200 bg-white shadow-card p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{r.title || r.kind}</span><span className="flex items-center gap-2"><Badge tone={TONE[r.status]}>{r.status}</Badge><span className="text-xs text-slate-400">{ago(r.started_at)}</span></span></div>
             <div className="text-xs text-slate-500">{r.kind} → {r.request?.to}</div>{r.error && <div className="mt-1 text-xs text-rose-600">{r.error}</div>}
             {r.response && <details className="mt-1"><summary className="cursor-pointer text-xs text-slate-500">viaSocket response</summary><pre className="mt-1 overflow-x-auto rounded bg-slate-50 p-2 text-xs">{JSON.stringify(r.response, null, 2)}</pre></details>}</li>))}</ul>))
       : tab === 'sync' ? (sync.isLoading ? <Spinner /> : !sync.data.length ? <Empty>No form submissions yet.</Empty> : (
         <ul className="space-y-2">{sync.data.map((e) => (
-          <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm"><span>{e.full_name || e.message || 'Submission'} <span className="text-xs text-slate-400">via {e.source}</span>{e.outcome !== 'created' && e.message && <span className="ml-2 text-xs text-slate-500">{e.message}</span>}</span>
+          <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-slate-200 bg-white shadow-card p-3 text-sm"><span>{e.full_name || e.message || 'Submission'} <span className="text-xs text-slate-400">via {e.source}</span>{e.outcome !== 'created' && e.message && <span className="ml-2 text-xs text-slate-500">{e.message}</span>}</span>
             <span className="flex items-center gap-2"><Badge tone={TONE[e.outcome === 'rejected' ? 'rejected_' : e.outcome]}>{e.outcome}</Badge><span className="text-xs text-slate-400">{ago(e.created_at)}</span></span></li>))}</ul>))
       : approvals.isLoading ? <Spinner /> : (<>
         {tab === 'pending' && approvals.data?.length > 1 && <div className="flex justify-end"><Button size="sm" loading={all.isPending} onClick={() => all.mutate()}>Approve all ({approvals.data.length})</Button></div>}
         {!approvals.data?.length ? <Empty>{tab === 'pending' ? 'Nothing is waiting for approval.' : 'No approvals yet.'}</Empty> : (
           <ul className="space-y-2">{approvals.data.map((a) => (
-            <li key={a.id} className="rounded-xl border border-slate-200 bg-white p-3 text-sm">
+            <li key={a.id} className="rounded-[10px] border border-slate-200 bg-white shadow-card p-3 text-sm">
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0"><button className="text-left font-medium hover:text-indigo-700" onClick={() => setOpen(open === a.id ? null : a.id)}>{a.title}</button>
+                <div className="min-w-0"><button className="text-left font-medium hover:text-brand-700" onClick={() => setOpen(open === a.id ? null : a.id)}>{a.title}</button>
                   <div className="text-xs text-slate-500">To {a.payload.to || 'no address'} · requested by {a.requested_by} · {ago(a.created_at)}</div>
-                  {a.payload.attachments?.length > 0 && <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700">📎 {a.payload.attachments.map((x) => x.name).join(', ')}</div>}{a.reason && <div className="mt-1 text-xs text-slate-600">Why: {a.reason}</div>}{a.error && <div className="mt-1 text-xs text-rose-600">{a.error}</div>}</div>
+                  {a.payload.attachments?.length > 0 && <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-700">📎 {a.payload.attachments.map((x) => x.name).join(', ')}</div>}{a.reason && <div className="mt-1 text-xs text-slate-600">Why: {a.reason}</div>}{a.error && <div className="mt-1 text-xs text-rose-600">{a.error}</div>}</div>
                 <div className="flex items-center gap-2"><Badge tone={TONE[a.status]}>{a.status}</Badge>
                   {(a.status === 'failed' || a.status === 'executed') && <Button size="sm" variant="secondary" loading={act.isPending && act.variables?.id === a.id && act.variables.what === 'retry'} onClick={() => act.mutate({ id: a.id, what: 'retry' })}>{a.status === 'failed' ? 'Retry' : 'Send again'}</Button>}
                   {a.status === 'pending' && <><Button size="sm" loading={act.isPending && act.variables?.id === a.id && act.variables.what === 'approve'} onClick={() => act.mutate({ id: a.id, what: 'approve' })}>Approve & send</Button>

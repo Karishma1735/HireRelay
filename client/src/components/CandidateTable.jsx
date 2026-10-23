@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { Search, Trash2, ChevronDown, ChevronRight, Paperclip, FileText, Download, Upload, X, ArrowRight } from 'lucide-react'
 import { get, post, patch, del, upload, openProtectedFile } from '../lib/api.js'
 import { STAGE_LABEL } from '../lib/format.js'
-import { Alert, Button, Empty, Field, Modal, Spinner, StageBadge } from './ui.jsx'
+import { Alert, Avatar, Button, Empty, Field, Modal, Spinner, StageBadge, Token } from './ui.jsx'
 
 // The 'Check in' label is swapped for 'Check in & queue' at render time when auto-queue is on.
 const NEXT = {
@@ -53,17 +53,17 @@ export default function CandidateTable({ driveId, interviewerId, initialPendingF
 
   const renderTable = (list) => (
     <table className="w-full min-w-[820px] table-fixed text-left text-sm">
-      <colgroup><col className="w-10" /><col className="w-12" /><col /><col className="w-36" /><col className="w-44" /><col className="w-[300px]" /></colgroup>
-      <thead className="text-xs uppercase text-slate-500"><tr><th className="w-8 px-3 py-2">{driveId && <input type="checkbox" aria-label="Select all" checked={list.length > 0 && list.every((c) => sel.has(c.id))} onChange={() => setSel(list.every((c) => sel.has(c.id)) ? new Set() : new Set(list.map((c) => c.id)))} />}</th><th className="px-3 py-2">#</th><th className="px-3 py-2">Candidate</th><th className="px-3 py-2">Stage</th><th className="px-3 py-2">Interviewer</th><th className="px-3 py-2 text-right">Actions</th></tr></thead>
+      <colgroup><col className="w-10" /><col className="w-12" /><col /><col className="w-36" /><col className="w-52" /><col className="w-[300px]" /></colgroup>
+      <thead className="bg-slate-50 text-xs font-medium text-slate-500"><tr><th className="w-8 px-3 py-2">{driveId && <input type="checkbox" aria-label="Select all" checked={list.length > 0 && list.every((c) => sel.has(c.id))} onChange={() => setSel(list.every((c) => sel.has(c.id)) ? new Set() : new Set(list.map((c) => c.id)))} />}</th><th className="px-3 py-2">Token</th><th className="px-3 py-2">Candidate</th><th className="px-3 py-2">Stage</th><th className="px-3 py-2">Interviewer</th><th className="px-3 py-2 text-right">Actions</th></tr></thead>
       <tbody className="divide-y divide-slate-100">{list.map(renderRow)}</tbody>
     </table>
   )
   const renderRow = (c) => (
-    <tr key={c.id} className={`hover:bg-slate-50 ${sel.has(c.id) ? 'bg-indigo-50/50' : ''}`}>
+    <tr key={c.id} className={`transition hover:bg-slate-50 ${sel.has(c.id) ? 'bg-brand-50/60' : ''}`}>
       <td className="px-3 py-2"><input type="checkbox" aria-label={`Select ${c.full_name}`} checked={sel.has(c.id)} onChange={() => toggle(c.id)} /></td>
-      <td className="px-3 py-2 tabular-nums text-slate-400">{c.queue_number ?? ''}</td>
-      <td className="px-3 py-2"><button className="inline-flex items-center gap-1.5 text-left font-medium text-slate-900 hover:text-indigo-700" onClick={() => setOpen(c.id)}>{c.full_name}{c.has_cv && <Paperclip className="h-3.5 w-3.5 text-indigo-500" aria-label="Has a CV" />}</button>
-        <div className="text-xs text-slate-500">{[c.email, c.phone].filter(Boolean).join(' · ')}</div></td>
+      <td className="px-3 py-2"><Token n={c.queue_number} /></td>
+      <td className="px-3 py-2"><div className="flex items-center gap-2.5"><Avatar name={c.full_name} size="h-8 w-8 text-xs" /><div className="min-w-0"><button className="inline-flex items-center gap-1.5 text-left font-medium text-ink-900 hover:text-brand-700" onClick={() => setOpen(c.id)}>{c.full_name}{c.has_cv && <Paperclip className="h-3.5 w-3.5 text-brand-500" aria-label="Has a CV" />}</button>
+        <div className="truncate text-xs text-slate-500">{[c.email, c.phone].filter(Boolean).join(' · ')}</div></div></div></td>
       <td className="px-3 py-2"><StageBadge stage={c.stage} />{c.interview_completed_at && !c.has_feedback && <span className="ml-1 text-xs text-rose-600">feedback due</span>}
         {c.rounds_total > 1 && <div className="mt-1"><span className="inline-block whitespace-nowrap rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600" title={`Round ${c.round} of ${c.rounds_total}`}>Round {c.round} · {c.round_name}</span></div>}</td>
       <td className="px-3 py-2">
@@ -95,13 +95,13 @@ export default function CandidateTable({ driveId, interviewerId, initialPendingF
       </div>
       {error && <Alert>{error}</Alert>}
       {sel.size > 0 && (
-        <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-          <span>{sel.size} selected</span>
-          <div className="flex gap-2"><Button size="sm" variant="ghost" onClick={() => setSel(new Set())}>Clear</Button>
-            <Button size="sm" variant="danger" loading={remove.isPending} onClick={() => askDelete([...sel], `${sel.size} candidate${sel.size > 1 ? 's' : ''}`)}>Delete selected</Button></div>
+        <div className="sticky bottom-4 z-10 mx-auto flex w-fit max-w-full items-center gap-4 rounded-[10px] bg-ink-800 px-3 py-2 text-sm text-white shadow-pop">
+          <span className="pl-1 font-medium">{sel.size} selected</span>
+          <div className="flex gap-2"><Button size="sm" variant="ghost" className="!text-slate-300 hover:!bg-white/10" onClick={() => setSel(new Set())}>Clear</Button>
+            <Button size="sm" variant="danger" className="!bg-transparent !text-rose-300 !ring-rose-400/40 hover:!bg-white/10" loading={remove.isPending} onClick={() => askDelete([...sel], `${sel.size} candidate${sel.size > 1 ? 's' : ''}`)}>Delete selected</Button></div>
         </div>)}
       {list.isLoading ? <Spinner /> : !rows.length ? <Empty>No candidates match.</Empty> : driveId ? (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">{renderTable(rows)}</div>
+        <div className="overflow-x-auto rounded-[10px] border border-slate-200 bg-white shadow-card">{renderTable(rows)}</div>
       ) : (
         <div className="space-y-4">
           {groups.map((g) => {
@@ -110,12 +110,12 @@ export default function CandidateTable({ driveId, interviewerId, initialPendingF
             const stats = [[count((c) => c.stage === 'registered'), 'registered'], [count((c) => c.stage === 'waiting'), 'waiting'], [count((c) => c.stage === 'in_interview'), 'in interview'],
               [count((c) => c.interview_completed_at), 'interviewed'], [count((c) => c.interview_completed_at && !c.has_feedback), 'feedback due']].filter(([n]) => n > 0)
             return (
-              <section key={g.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label={`Drive ${g.name}`}>
-                <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-100 bg-slate-50 px-3 py-2.5">
+              <section key={g.id} className="overflow-hidden rounded-[10px] border border-slate-200 bg-white shadow-card" aria-label={`Drive ${g.name}`}>
+                <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-100 bg-slate-50/70 px-3 py-2.5">
                   <button className="rounded p-0.5 hover:bg-slate-200" aria-label={shut ? `Expand ${g.name}` : `Collapse ${g.name}`} aria-expanded={!shut} onClick={() => setCollapsed((c) => { const n = new Set(c); n.has(g.id) ? n.delete(g.id) : n.add(g.id); return n })}>
                     {shut ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button>
                   <input type="checkbox" aria-label={`Select all in ${g.name}`} checked={all} onChange={() => setSel((s) => { const n = new Set(s); ids.forEach((id) => (all ? n.delete(id) : n.add(id))); return n })} />
-                  <Link to={`/drives/${g.id}`} className="font-semibold text-slate-900 hover:text-indigo-700">{g.name}</Link>
+                  <Link to={`/drives/${g.id}`} className="font-semibold text-slate-900 hover:text-brand-700">{g.name}</Link>
                   <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200">{g.rows.length} candidate{g.rows.length > 1 ? 's' : ''}</span>
                   <span className="text-xs text-slate-500">{stats.map(([n, l]) => `${n} ${l}`).join(' · ')}</span>
                   {g.date && <span className="ml-auto text-xs text-slate-400">{g.date}</span>}
@@ -185,7 +185,7 @@ function CvSection({ id, cv }) {
       <h4 className="mb-2 font-semibold">CV</h4>
       {cv ? (
         <div className="flex flex-wrap items-center gap-3 rounded-lg bg-slate-50 p-3">
-          <FileText className="h-5 w-5 shrink-0 text-indigo-600" />
+          <FileText className="h-5 w-5 shrink-0 text-brand-600" />
           <div className="min-w-0 flex-1"><div className="truncate font-medium">{cv.name}</div><div className="text-xs text-slate-500">{Math.max(1, Math.round(cv.size / 1024))} KB · added {new Date(cv.uploaded_at).toLocaleDateString()}</div></div>
           <Button size="sm" variant="secondary" loading={busy} onClick={open}>{cv.mime === 'application/pdf' ? 'Open' : <><Download className="h-3.5 w-3.5" /> Download</>}</Button>
           <label className="cursor-pointer rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"><Upload className="mr-1 inline h-3.5 w-3.5" />Replace<input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={choose} /></label>
@@ -194,7 +194,7 @@ function CvSection({ id, cv }) {
       ) : (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-slate-300 p-3 text-slate-500">
           <span>No CV yet.</span>
-          <label className="cursor-pointer rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"><Upload className="mr-1 inline h-3.5 w-3.5" />Upload CV<input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={choose} /></label>
+          <label className="cursor-pointer rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"><Upload className="mr-1 inline h-3.5 w-3.5" />Upload CV<input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={choose} /></label>
         </div>)}
       <p className="mt-1.5 text-xs text-slate-400">PDF, DOC or DOCX, up to 5 MB. Interviewers receive it by email when assigned.</p>
       {error && <div className="mt-2"><Alert>{error}</Alert></div>}
