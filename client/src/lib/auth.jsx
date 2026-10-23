@@ -12,7 +12,8 @@ export const useAuth = () => useContext(Ctx)
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(read)
   const authenticate = useCallback(async (mode, email, password) => {
-    const res = await fetch(`/api/auth/${mode}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) })
+    // The form calls its two modes 'signin' and 'signup'; the server routes are /auth/login and /auth/signup.
+    const res = await fetch(`/api/auth/${mode === 'signin' ? 'login' : mode}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) })
     const j = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(j.details?.join('. ') || j.error || 'Could not sign in')
     write(j); setSession(j)
